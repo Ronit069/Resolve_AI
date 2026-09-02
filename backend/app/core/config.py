@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # Module H: H-05 Dual Control
     DUAL_CONTROL_AMOUNT_THRESHOLD_MINOR: int = Field(default=5_000_000, description="Dispute amount (INR minor units/paise) at or above which APPROVE_CONTEST/APPROVE_ACCEPT require a second, distinct APPROVER (₹50,000)")
 
+    # Module I: minimal browser-support CORS
+    CORS_ALLOWED_ORIGIN: str = Field(default="http://localhost:5173", description="Exact origin the Module I frontend is served from (no wildcard)")
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 settings = Settings()
