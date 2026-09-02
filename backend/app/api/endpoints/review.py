@@ -265,6 +265,7 @@ def submit_review_action(
             )
             db.add(escalate_action)
             queue_item.queue_status = QueueStatus.DONE
+            queue_item.pending_review_action_id = None
             db.commit()
             db.refresh(escalate_action)
             escalate_action.dual_approval_status = "ESCALATED_CANCELLED"
@@ -305,6 +306,7 @@ def submit_review_action(
         )
         db.add(second_action)
         queue_item.queue_status = QueueStatus.DONE
+        queue_item.pending_review_action_id = None
         db.commit()
         db.refresh(second_action)
         second_action.dual_approval_status = "FINALIZED"
@@ -334,16 +336,24 @@ def submit_review_action(
 
     db.add(review_action)
 
-    # H-05 Dual Control: gate APPROVE_CONTEST/APPROVE_ACCEPT on high amount or hard-block override
-    dispute = db.query(Dispute).filter(Dispute.case_id == case_id).first()
-    if dispute is not None and requires_dual_approval(request.action, prediction, dispute):
-        db.flush()  # assign review_action.id before referencing it
-        queue_item.pending_review_action_id = review_action.id
-        queue_item.queue_status = QueueStatus.PENDING_SECOND_APPROVAL
-        db.commit()
-        db.refresh(review_action)
-        review_action.dual_approval_status = "AWAITING_SECOND_APPROVAL"
-        return review_action
+    # H-05 Dual Control: gate APPROVE_CONTEST/APPROVE_ACCEPT on high amount or hard-block override.
+    # Fail closed if the dispute cannot be loaded: without it we cannot verify the
+    # amount-based threshold, so we must not silently finalize a gated decision.
+    if request.action in (ReviewActionEnum.APPROVE_CONTEST, ReviewActionEnum.APPROVE_ACCEPT):
+        dispute = db.query(Dispute).filter(Dispute.case_id == case_id).first()
+        if dispute is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Associated dispute not found; cannot evaluate H-05 dual control"
+            )
+        if requires_dual_approval(request.action, prediction, dispute):
+            db.flush()  # assign review_action.id before referencing it
+            queue_item.pending_review_action_id = review_action.id
+            queue_item.queue_status = QueueStatus.PENDING_SECOND_APPROVAL
+            db.commit()
+            db.refresh(review_action)
+            review_action.dual_approval_status = "AWAITING_SECOND_APPROVAL"
+            return review_action
 
     # 11. Update queue status
     queue_item.queue_status = QueueStatus.DONE

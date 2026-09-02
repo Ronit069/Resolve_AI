@@ -520,3 +520,63 @@ def test_both_approvals_independently_recorded(client, db):
     assert actions[1].reviewer_id == a2.user_id
     assert actions[0].notes == "first"
     assert actions[1].notes == "second"
+
+
+# 17. pending_review_action_id is cleared once the second approval finalizes the decision.
+def test_pending_pointer_cleared_on_finalization(client, db):
+    merchant, a1, a2, a3, _, case, _, model_version, decision_policy, validation_run = setup_base_data(db)
+    qi, pred, dispute = create_queue_item(db, case, model_version, decision_policy, validation_run, amount_minor=HIGH_AMOUNT)
+
+    headers1 = {"X-User-Id": str(a1.user_id)}
+    r1 = client.post(f"/api/v1/cases/{case.case_id}/review-action", headers=headers1, json={"action": "APPROVE_CONTEST"})
+    assert r1.status_code == 201
+
+    db.refresh(qi)
+    assert qi.pending_review_action_id is not None  # set while awaiting second approval
+
+    headers2 = {"X-User-Id": str(a2.user_id)}
+    r2 = client.post(f"/api/v1/cases/{case.case_id}/review-action", headers=headers2, json={"action": "APPROVE_CONTEST"})
+    assert r2.status_code == 201
+
+    db.refresh(qi)
+    assert qi.queue_status == QueueStatus.DONE
+    assert qi.pending_review_action_id is None  # cleared once finalized, no stale pointer
+
+
+# 18. pending_review_action_id is cleared when ESCALATE cancels the pending state.
+def test_pending_pointer_cleared_on_escalate(client, db):
+    merchant, a1, a2, a3, _, case, _, model_version, decision_policy, validation_run = setup_base_data(db)
+    qi, pred, dispute = create_queue_item(db, case, model_version, decision_policy, validation_run, amount_minor=HIGH_AMOUNT)
+
+    headers1 = {"X-User-Id": str(a1.user_id)}
+    r1 = client.post(f"/api/v1/cases/{case.case_id}/review-action", headers=headers1, json={"action": "APPROVE_CONTEST"})
+    assert r1.status_code == 201
+
+    headers2 = {"X-User-Id": str(a2.user_id)}
+    r2 = client.post(f"/api/v1/cases/{case.case_id}/review-action", headers=headers2, json={"action": "ESCALATE"})
+    assert r2.status_code == 201
+
+    db.refresh(qi)
+    assert qi.queue_status == QueueStatus.DONE
+    assert qi.pending_review_action_id is None  # cleared, no stale pointer left behind
+
+
+# 19. Fail closed: a gated action (APPROVE_CONTEST/APPROVE_ACCEPT) must be blocked, not
+# silently finalized as a single approval, if the associated Dispute cannot be loaded.
+def test_fail_closed_when_dispute_missing_for_gated_action(client, db):
+    merchant, a1, a2, a3, _, case, _, model_version, decision_policy, validation_run = setup_base_data(db)
+    qi, pred, dispute = create_queue_item(db, case, model_version, decision_policy, validation_run, amount_minor=HIGH_AMOUNT)
+
+    # Simulate a missing/unreachable Dispute row for this case.
+    db.delete(dispute)
+    db.commit()
+
+    headers = {"X-User-Id": str(a1.user_id)}
+    response = client.post(f"/api/v1/cases/{case.case_id}/review-action", headers=headers, json={"action": "APPROVE_CONTEST"})
+    assert response.status_code == 500
+    assert "dispute" in response.json()["detail"].lower()
+
+    db.refresh(qi)
+    assert qi.queue_status == QueueStatus.PENDING  # never silently finalized
+    actions = db.query(ReviewAction).filter(ReviewAction.queue_item_id == qi.id).all()
+    assert len(actions) == 0  # nothing committed
