@@ -122,3 +122,32 @@ class ReviewActionResponse(BaseModel):
     # H-05 Dual Control: "AWAITING_SECOND_APPROVAL" | "FINALIZED" | "ESCALATED_CANCELLED" | None
     dual_approval_status: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
+
+
+# H-22 Observability: aggregate-only queue metrics (queue age, cases near
+# deadline, review turnaround). Submission success rate, API errors and
+# won/lost/closed outcome metrics are deferred (blocked on H-13/H-19) and
+# intentionally have no schema here.
+
+class H22QueueAgeMetrics(BaseModel):
+    active_item_count: int
+    average_age_seconds: Optional[float] = None
+    min_age_seconds: Optional[float] = None
+    max_age_seconds: Optional[float] = None
+
+class H22NearDeadlineMetrics(BaseModel):
+    threshold_hours: int
+    near_deadline_count: int
+    expired_count: int
+
+class H22ReviewTurnaroundMetrics(BaseModel):
+    completed_item_count: int
+    average_turnaround_seconds: Optional[float] = None
+    min_turnaround_seconds: Optional[float] = None
+    max_turnaround_seconds: Optional[float] = None
+
+class H22ObservabilityMetricsResponse(BaseModel):
+    generated_at: datetime
+    queue_age: H22QueueAgeMetrics
+    near_deadline: H22NearDeadlineMetrics
+    review_turnaround: H22ReviewTurnaroundMetrics
