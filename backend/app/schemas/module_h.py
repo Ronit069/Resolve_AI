@@ -119,4 +119,6 @@ class ReviewActionResponse(BaseModel):
     notes: Optional[str] = None
     draft_revision_json: Optional[Dict[str, Any]] = None
     created_at: datetime
+    # H-05 Dual Control: "AWAITING_SECOND_APPROVAL" | "FINALIZED" | "ESCALATED_CANCELLED" | None
+    dual_approval_status: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)

@@ -11,6 +11,7 @@ from app.models.module_e import CaseFeatureSnapshot, EvidenceValidationRun, Evid
 from app.models.module_f import RiskPrediction, PredictionExplanation
 from app.models.module_g import GeneratedDraft, DraftClaim, LLMGuardrailResult
 from app.models.module_c import EvidenceDocument
+from app.services.review.dual_control import requires_dual_approval
 
 from app.schemas.module_h import (
     CaseWorkspaceResponse, H02CaseSchema, H02DisputeSchema, H02QueueItemSchema,
@@ -174,6 +175,19 @@ def get_case_review_workspace(
         uncertainty_warnings=warnings
     )
 
+def _needs_h18_override(prediction: RiskPrediction, action: ReviewActionEnum) -> bool:
+    """H-18: contradiction/override conditions requiring reason_code + notes."""
+    if prediction.recommendation == "ACCEPT" and action == ReviewActionEnum.APPROVE_CONTEST:
+        return True
+    if prediction.recommendation == "CONTEST" and action == ReviewActionEnum.APPROVE_ACCEPT:
+        return True
+    if prediction.hard_block and action == ReviewActionEnum.APPROVE_CONTEST:
+        return True
+    if action == ReviewActionEnum.REJECT_RECOMMENDATION:
+        return True
+    return False
+
+
 @router.post("/{case_id}/review-action", response_model=ReviewActionResponse, status_code=status.HTTP_201_CREATED)
 def submit_review_action(
     case_id: uuid.UUID,
@@ -211,40 +225,101 @@ def submit_review_action(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Queue item is already DONE"
         )
-        
-    # 7. Load RiskPrediction to enforce H-18
+
+    # 7. Load RiskPrediction to enforce H-18 / H-05
     prediction = db.query(RiskPrediction).filter(
         RiskPrediction.id == queue_item.prediction_id
     ).first()
-    
+
     if not prediction:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Associated risk prediction not found"
         )
 
+    # H-05 Dual Control: case is awaiting a second, distinct APPROVER
+    if queue_item.queue_status == QueueStatus.PENDING_SECOND_APPROVAL:
+        pending_action = db.query(ReviewAction).filter(
+            ReviewAction.id == queue_item.pending_review_action_id
+        ).first()
+
+        if not pending_action:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Pending first approval could not be located"
+            )
+
+        # ESCALATE is always accepted while pending: it cancels the pending
+        # second-approval state without ever finalizing the decision, and may
+        # be submitted by any active APPROVER, including the original first approver.
+        if request.action == ReviewActionEnum.ESCALATE:
+            escalate_action = ReviewAction(
+                id=uuid.uuid4(),
+                queue_item_id=queue_item.id,
+                case_id=case_id,
+                reviewer_id=current_user.user_id,
+                action=ReviewActionEnum.ESCALATE,
+                override_reason_code=request.override_reason_code,
+                notes=request.notes,
+                draft_revision_json=None,
+            )
+            db.add(escalate_action)
+            queue_item.queue_status = QueueStatus.DONE
+            db.commit()
+            db.refresh(escalate_action)
+            escalate_action.dual_approval_status = "ESCALATED_CANCELLED"
+            return escalate_action
+
+        # Any other mismatch with the pending action is rejected.
+        if request.action != pending_action.action:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Case is pending second approval; only a matching confirmation of the pending action or ESCALATE is accepted"
+            )
+
+        # Dual approval requires two distinct active APPROVER users.
+        if current_user.user_id == pending_action.reviewer_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Second approval must come from a different active APPROVER than the first"
+            )
+
+        # Both approval events must be independently auditable: the second
+        # approver's own H-18 justification is required, not inherited from the first.
+        if _needs_h18_override(prediction, request.action):
+            if not request.override_reason_code or not request.notes:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="override_reason_code and notes are required when contradicting ML recommendation or overriding a hard block"
+                )
+
+        second_action = ReviewAction(
+            id=uuid.uuid4(),
+            queue_item_id=queue_item.id,
+            case_id=case_id,
+            reviewer_id=current_user.user_id,
+            action=request.action,
+            override_reason_code=request.override_reason_code,
+            notes=request.notes,
+            draft_revision_json=request.draft_revision_json if request.action == ReviewActionEnum.EDIT_DRAFT else None,
+        )
+        db.add(second_action)
+        queue_item.queue_status = QueueStatus.DONE
+        db.commit()
+        db.refresh(second_action)
+        second_action.dual_approval_status = "FINALIZED"
+        return second_action
+
     # 8-9. Validate H-18 overrides
-    needs_override = False
-    
-    if prediction.recommendation == "ACCEPT" and request.action == ReviewActionEnum.APPROVE_CONTEST:
-        needs_override = True
-        
-    elif prediction.recommendation == "CONTEST" and request.action == ReviewActionEnum.APPROVE_ACCEPT:
-        needs_override = True
-        
-    elif prediction.hard_block and request.action == ReviewActionEnum.APPROVE_CONTEST:
-        needs_override = True
-        
-    elif request.action == ReviewActionEnum.REJECT_RECOMMENDATION:
-        needs_override = True
-        
+    needs_override = _needs_h18_override(prediction, request.action)
+
     if needs_override:
         if not request.override_reason_code or not request.notes:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="override_reason_code and notes are required when contradicting ML recommendation or overriding a hard block"
             )
-            
+
     # 10. Create ReviewAction
     review_action = ReviewAction(
         id=uuid.uuid4(),
@@ -256,15 +331,27 @@ def submit_review_action(
         notes=request.notes,
         draft_revision_json=request.draft_revision_json if request.action == ReviewActionEnum.EDIT_DRAFT else None,
     )
-    
+
     db.add(review_action)
-    
+
+    # H-05 Dual Control: gate APPROVE_CONTEST/APPROVE_ACCEPT on high amount or hard-block override
+    dispute = db.query(Dispute).filter(Dispute.case_id == case_id).first()
+    if dispute is not None and requires_dual_approval(request.action, prediction, dispute):
+        db.flush()  # assign review_action.id before referencing it
+        queue_item.pending_review_action_id = review_action.id
+        queue_item.queue_status = QueueStatus.PENDING_SECOND_APPROVAL
+        db.commit()
+        db.refresh(review_action)
+        review_action.dual_approval_status = "AWAITING_SECOND_APPROVAL"
+        return review_action
+
     # 11. Update queue status
     queue_item.queue_status = QueueStatus.DONE
-    
+
     # 12. Flush/commit transaction
     db.commit()
     db.refresh(review_action)
-    
+
     # 13. Return created ReviewAction
+    review_action.dual_approval_status = None
     return review_action

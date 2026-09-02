@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     SUMMARY_MAX_LENGTH: int = Field(default=1000, description="Max characters for generated contest summary (Razorpay limit)")
     CITATION_COVERAGE_MIN: float = Field(default=0.5, description="Minimum fraction of claims that must have grounding; below this routes to REVIEW")
 
+    # Module H: H-05 Dual Control
+    DUAL_CONTROL_AMOUNT_THRESHOLD_MINOR: int = Field(default=5_000_000, description="Dispute amount (INR minor units/paise) at or above which APPROVE_CONTEST/APPROVE_ACCEPT require a second, distinct APPROVER (₹50,000)")
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 settings = Settings()
