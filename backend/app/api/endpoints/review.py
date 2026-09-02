@@ -183,6 +183,8 @@ def _needs_h18_override(prediction: RiskPrediction, action: ReviewActionEnum) ->
         return True
     if prediction.hard_block and action == ReviewActionEnum.APPROVE_CONTEST:
         return True
+    if prediction.recommendation == "REVIEW" and action == ReviewActionEnum.APPROVE_CONTEST:
+        return True
     if action == ReviewActionEnum.REJECT_RECOMMENDATION:
         return True
     return False
