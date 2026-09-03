@@ -321,3 +321,45 @@ def test_seed_demo_functions_are_idempotent():
     assert champion1.id == champion2.id
     from app.models.module_f import ModelVersion
     assert db.query(ModelVersion).count() == 1
+
+    decision_policy1 = seed_demo.seed_decision_policy(db, champion1)
+    decision_policy2 = seed_demo.seed_decision_policy(db, champion1)
+    assert decision_policy1.id == decision_policy2.id
+    from app.models.module_f import ModelDecisionPolicy
+    assert db.query(ModelDecisionPolicy).count() == 1
+
+
+# Final Submission Checklist §22: "Three demo cases cover contest, review
+# and accept/missing-evidence outcomes."
+def test_seed_demo_cases_are_three_distinct_and_idempotent():
+    import scripts.seed_demo as seed_demo
+    from app.models.module_a import Dispute
+    from app.models.module_f import RiskPrediction
+    from app.models.module_h import QueueStatus, ReviewAction, ReviewActionEnum, ReviewQueueItem
+
+    db = TestingSessionLocal()
+    merchant = seed_demo.seed_merchant(db)
+    seed_demo.seed_users(db, merchant)
+    evidence_policy = seed_demo.seed_reason_code_policy(db)
+    champion = seed_demo.seed_champion_model(db)
+    decision_policy = seed_demo.seed_decision_policy(db, champion)
+
+    seed_demo.seed_demo_cases(db, evidence_policy, champion, decision_policy)
+    # Run twice: must not create duplicates.
+    seed_demo.seed_demo_cases(db, evidence_policy, champion, decision_policy)
+
+    assert db.query(Dispute).count() == 3
+    assert db.query(RiskPrediction).count() == 3
+    assert db.query(ReviewQueueItem).count() == 3
+    assert db.query(ReviewAction).count() == 2  # PENDING (review) case has none
+
+    def _state(external_dispute_id):
+        dispute = db.query(Dispute).filter(Dispute.external_dispute_id == external_dispute_id).first()
+        prediction = db.query(RiskPrediction).filter(RiskPrediction.case_id == dispute.case_id).first()
+        queue_item = db.query(ReviewQueueItem).filter(ReviewQueueItem.case_id == dispute.case_id).first()
+        action = db.query(ReviewAction).filter(ReviewAction.queue_item_id == queue_item.id).first()
+        return prediction.recommendation, queue_item.queue_status, (action.action if action else None)
+
+    assert _state("demo_disp_seed_001") == ("CONTEST", QueueStatus.DONE, ReviewActionEnum.APPROVE_CONTEST)
+    assert _state("demo_disp_seed_002") == ("REVIEW", QueueStatus.PENDING, None)
+    assert _state("demo_disp_seed_003") == ("ACCEPT", QueueStatus.DONE, ReviewActionEnum.APPROVE_ACCEPT)
