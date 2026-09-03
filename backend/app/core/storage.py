@@ -60,4 +60,9 @@ class StorageClient:
             print(f"Failed to delete file {object_name}: {e}")
             return False
 
+    def download_file(self, object_name: str) -> bytes:
+        """Read an object's full contents from storage (Module J, Category D: Razorpay document upload)."""
+        response = self.s3_client.get_object(Bucket=self.bucket, Key=object_name)
+        return response["Body"].read()
+
 storage_client = StorageClient()

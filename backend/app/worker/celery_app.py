@@ -5,7 +5,7 @@ celery_app = Celery(
     "resolveai_worker",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=['app.worker.tasks']
+    include=['app.worker.tasks', 'app.worker.external_action_tasks']
 )
 
 celery_app.conf.update(

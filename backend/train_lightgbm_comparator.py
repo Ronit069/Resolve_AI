@@ -185,7 +185,33 @@ def main():
     
     with open(os.path.join(out_dir, "metadata_lightgbm.json"), "w") as f:
         json.dump(meta, f, indent=2)
-        
+
+    # Module L, L-01/L-02/L-03: best-effort MLflow tracking. Purely additive —
+    # logs exactly what `meta` above already computed; never changes what this
+    # script computes, and a training run succeeds identically whether or not
+    # an MLflow tracking server is reachable (see log_training_run docstring).
+    from app.services.mlops.mlflow_tracking import log_training_run
+
+    log_training_run(
+        experiment_name="resolveai_risk_model",
+        run_name=os.path.basename(out_dir),
+        params={
+            "model_type": meta["model_type"],
+            "training_seed": meta["training_seed"],
+            **{f"hp_{k}": v for k, v in best_config.items()},
+            **{f"cost_{k}": v for k, v in meta["cost_configuration"].items()},
+        },
+        metrics=metrics,
+        tags={
+            "algorithm": "lgbm",
+            "train_dataset_hash": meta["provenance"]["train_hash"],
+            "validation_dataset_hash": meta["provenance"]["validation_hash"],
+            "lightgbm_version": meta["provenance"]["lightgbm_version"],
+            "model_artifact_sha256": model_hash,
+        },
+        artifact_dir=out_dir,
+    )
+
     print(f"Done. Artifacts exported to {out_dir}")
 
 if __name__ == "__main__":

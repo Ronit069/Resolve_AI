@@ -379,11 +379,35 @@ def test_hard_block_requires_override(client, db):
 def test_reject_recommendation_requires_override(client, db):
     merchant, user, _, _, case, _, _, model_version, decision_policy, validation_run = setup_base_data(db)
     qi, pred = create_queue_item(db, case, model_version, decision_policy, validation_run, recommendation="REVIEW")
-    
+
     headers = {"X-User-Id": str(user.user_id)}
     payload = {"action": "REJECT_RECOMMENDATION"}
     response = client.post(f"/api/v1/cases/{case.case_id}/review-action", headers=headers, json=payload)
     assert response.status_code == 400
+
+# 21. test_review_recommendation_approve_contest_requires_override
+def test_review_recommendation_approve_contest_requires_override(client, db):
+    merchant, user, _, _, case, _, _, model_version, decision_policy, validation_run = setup_base_data(db)
+    qi, pred = create_queue_item(db, case, model_version, decision_policy, validation_run, recommendation="REVIEW")
+
+    headers = {"X-User-Id": str(user.user_id)}
+    payload = {"action": "APPROVE_CONTEST"}
+    response = client.post(f"/api/v1/cases/{case.case_id}/review-action", headers=headers, json=payload)
+    assert response.status_code == 400
+    assert "override_reason_code" in response.text
+
+# 22. test_review_recommendation_approve_contest_with_override_succeeds
+def test_review_recommendation_approve_contest_with_override_succeeds(client, db):
+    merchant, user, _, _, case, _, _, model_version, decision_policy, validation_run = setup_base_data(db)
+    qi, pred = create_queue_item(db, case, model_version, decision_policy, validation_run, recommendation="REVIEW")
+
+    headers = {"X-User-Id": str(user.user_id)}
+    payload = {"action": "APPROVE_CONTEST", "override_reason_code": "REVIEW_JUDGMENT", "notes": "Evidence is strong enough despite REVIEW recommendation"}
+    response = client.post(f"/api/v1/cases/{case.case_id}/review-action", headers=headers, json=payload)
+    assert response.status_code == 201
+
+    db.refresh(qi)
+    assert qi.queue_status == QueueStatus.DONE
 
 # 21. test_reviewer_id_comes_from_authenticated_user
 def test_reviewer_id_comes_from_authenticated_user(client, db):

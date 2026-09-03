@@ -39,6 +39,75 @@ services:
       timeout: 20s
       retries: 3
 
+  # Module L: optional/local experiment tracking (frozen PO decision — no
+  # live external MLflow, no production credentials). Backed by a local
+  # volume, not a managed/hosted service.
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri /mlruns --default-artifact-root /mlruns
+    ports:
+      - "5001:5000"
+    volumes:
+      - mlflow_data:/mlruns
+
+  # Module L: API service (app/main.py), containerized — same code/deps as
+  # the existing (non-containerized) dev setup.
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.api
+    env_file:
+      - ./backend/.env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://minio:9000
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+
+  # Module L: Celery worker (app/worker/tasks.py etc.), containerized —
+  # same code/deps as the existing (non-containerized) dev setup.
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    env_file:
+      - ./backend/.env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://minio:9000
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+
+  # Module L: Module I frontend, containerized as a static build served by nginx.
+  web:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
 volumes:
   postgres_data:
   minio_data:
+  mlflow_data:

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import uuid
@@ -6,13 +7,22 @@ import uuid
 from app.core.config import settings
 from app.core.database import engine, Base, get_db
 from app.models.shared import Merchant, AppUser
-from app.api.endpoints import webhooks, dev, enrichment, evidence, intelligence, validation, generation, review
+from app.api.endpoints import webhooks, dev, enrichment, evidence, intelligence, validation, generation, review, observability, queue, audit, outcome_webhooks, runtime_observability
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Backend Foundation for Modules A, B, and C",
     version="0.2.0"
 )
 
+# Module I: minimal, origin-restricted CORS for the browser frontend.
+# No wildcard, no credentialed auth (X-User-Id is a plain header, not a cookie).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.CORS_ALLOWED_ORIGIN],
+    allow_methods=["GET", "POST"],
+    allow_headers=["X-User-Id", "Content-Type"],
+    allow_credentials=False,
+)
 
 
 @app.get("/health")
@@ -27,3 +37,8 @@ app.include_router(intelligence.router, prefix="/api/v1/documents", tags=["intel
 app.include_router(validation.router, prefix="/api/v1/cases", tags=["validation"])
 app.include_router(generation.router, prefix="/api/v1/cases", tags=["generation"])
 app.include_router(review.router, prefix="/api/v1/cases", tags=["review"])
+app.include_router(observability.router, prefix="/api/v1/observability", tags=["observability"])
+app.include_router(queue.router, prefix="/api/v1/cases", tags=["queue"])
+app.include_router(audit.router, prefix="/api/v1/cases", tags=["audit"])
+app.include_router(outcome_webhooks.router, prefix="/api/v1", tags=["outcome_feedback"])
+app.include_router(runtime_observability.router, prefix="/api/v1/observability", tags=["observability"])

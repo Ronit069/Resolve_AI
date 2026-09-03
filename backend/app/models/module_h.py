@@ -11,6 +11,7 @@ class QueueStatus(str, enum.Enum):
     PENDING = "PENDING"
     ASSIGNED = "ASSIGNED"
     DONE = "DONE"
+    PENDING_SECOND_APPROVAL = "PENDING_SECOND_APPROVAL"
 
 class ReviewActionEnum(str, enum.Enum):
     APPROVE_CONTEST = "APPROVE_CONTEST"
@@ -70,6 +71,21 @@ class ReviewQueueItem(Base):
     assigned_to = Column(UUID(as_uuid=True), ForeignKey("app_users.user_id"), nullable=True, index=True)
     respond_by = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    # H-05 dual control: set while queue_status == PENDING_SECOND_APPROVAL, pointing
+    # at the first (not-yet-finalized) ReviewAction awaiting a second, distinct approver.
+    # use_alter=True: review_actions.queue_item_id already references this table, so this
+    # FK is mutually dependent and must be treated as deferred for DDL/topological sorting.
+    # ondelete=SET NULL: breaks the mutual-reference cycle at the data level so a
+    # review_actions row is never blocked from deletion by this pointer.
+    pending_review_action_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "review_actions.id", use_alter=True,
+            name="fk_review_queue_items_pending_review_action_id",
+            ondelete="SET NULL"
+        ),
+        nullable=True
+    )
 
 
 class ReviewAction(Base):
@@ -177,6 +193,9 @@ class ContestSubmission(Base):
 class DisputeOutcome(Base):
     """Table H9 - dispute_outcomes"""
     __tablename__ = "dispute_outcomes"
+    __table_args__ = (
+        UniqueConstraint("source_event_id", name="uq_dispute_outcomes_source_event_id"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     case_id = Column(UUID(as_uuid=True), ForeignKey("cases.case_id"), nullable=False, index=True)
