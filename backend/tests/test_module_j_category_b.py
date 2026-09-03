@@ -527,7 +527,7 @@ def test_draft_action_outbox_type_when_queue_pending(db):
 # 16. Dispatch claim behavior
 def test_dispatch_claim_behavior(db):
     merchant = make_merchant(db)
-    fx = make_finalized_case(db, merchant, n_documents=0)
+    fx = make_finalized_case(db, merchant, n_documents=1)
     assembly = assemble_contest_package(db, fx["case"].case_id, fx["review_action"].id, current_time=FIXED_NOW)
     write_outbox_for_package(db, fx["case"].case_id, assembly.contest_package_id, current_time=FIXED_NOW)
     outbox_row = db.query(ExternalActionOutbox).filter(ExternalActionOutbox.action_type == ExternalActionType.CONTEST_SUBMIT).first()
@@ -542,7 +542,7 @@ def test_dispatch_claim_behavior(db):
 
 def test_dispatch_claim_rejects_non_claimable_row(db):
     merchant = make_merchant(db)
-    fx = make_finalized_case(db, merchant, n_documents=0)
+    fx = make_finalized_case(db, merchant, n_documents=1)
     assembly = assemble_contest_package(db, fx["case"].case_id, fx["review_action"].id, current_time=FIXED_NOW)
     write_outbox_for_package(db, fx["case"].case_id, assembly.contest_package_id, current_time=FIXED_NOW)
     outbox_row = db.query(ExternalActionOutbox).filter(ExternalActionOutbox.action_type == ExternalActionType.CONTEST_SUBMIT).first()
@@ -557,7 +557,7 @@ def test_dispatch_claim_rejects_non_claimable_row(db):
 # 17. ExternalActionAttempt recording
 def test_external_action_attempt_recorded(db):
     merchant = make_merchant(db)
-    fx = make_finalized_case(db, merchant, n_documents=0)
+    fx = make_finalized_case(db, merchant, n_documents=1)
     assembly = assemble_contest_package(db, fx["case"].case_id, fx["review_action"].id, current_time=FIXED_NOW)
     write_outbox_for_package(db, fx["case"].case_id, assembly.contest_package_id, current_time=FIXED_NOW)
     outbox_row = db.query(ExternalActionOutbox).filter(ExternalActionOutbox.action_type == ExternalActionType.CONTEST_SUBMIT).first()
@@ -577,7 +577,7 @@ def test_external_action_attempt_recorded(db):
 # 18. Bounded retry/backoff scaffolding
 def test_bounded_retry_backoff_scaffolding(db):
     merchant = make_merchant(db)
-    fx = make_finalized_case(db, merchant, n_documents=0)
+    fx = make_finalized_case(db, merchant, n_documents=1)
     assembly = assemble_contest_package(db, fx["case"].case_id, fx["review_action"].id, current_time=FIXED_NOW)
     write_outbox_for_package(db, fx["case"].case_id, assembly.contest_package_id, current_time=FIXED_NOW)
     outbox_row = db.query(ExternalActionOutbox).filter(ExternalActionOutbox.action_type == ExternalActionType.CONTEST_SUBMIT).first()
@@ -609,7 +609,7 @@ def test_bounded_retry_backoff_scaffolding(db):
 # 19. Local terminal failure behavior (unimplemented boundary)
 def test_local_terminal_failure_boundary_not_implemented(db):
     merchant = make_merchant(db)
-    fx = make_finalized_case(db, merchant, n_documents=0)
+    fx = make_finalized_case(db, merchant, n_documents=1)
     assembly = assemble_contest_package(db, fx["case"].case_id, fx["review_action"].id, current_time=FIXED_NOW)
     write_outbox_for_package(db, fx["case"].case_id, assembly.contest_package_id, current_time=FIXED_NOW)
     outbox_row = db.query(ExternalActionOutbox).filter(ExternalActionOutbox.action_type == ExternalActionType.CONTEST_SUBMIT).first()
@@ -624,7 +624,7 @@ def test_local_terminal_failure_boundary_not_implemented(db):
 # 20. UNKNOWN_RESULT handling
 def test_unknown_result_not_auto_retried(db):
     merchant = make_merchant(db)
-    fx = make_finalized_case(db, merchant, n_documents=0)
+    fx = make_finalized_case(db, merchant, n_documents=1)
     assembly = assemble_contest_package(db, fx["case"].case_id, fx["review_action"].id, current_time=FIXED_NOW)
     write_outbox_for_package(db, fx["case"].case_id, assembly.contest_package_id, current_time=FIXED_NOW)
     outbox_row = db.query(ExternalActionOutbox).filter(ExternalActionOutbox.action_type == ExternalActionType.CONTEST_SUBMIT).first()

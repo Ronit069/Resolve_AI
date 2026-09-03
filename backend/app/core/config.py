@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     # Module I: minimal browser-support CORS
     CORS_ALLOWED_ORIGIN: str = Field(default="http://localhost:5173", description="Exact origin the Module I frontend is served from (no wildcard)")
 
+    # Module J, Category D: Razorpay external API credentials (global, not per-merchant)
+    RAZORPAY_KEY_ID: str = Field(..., description="Razorpay API key ID used for Basic Auth against api.razorpay.com")
+    RAZORPAY_KEY_SECRET: str = Field(..., description="Razorpay API key secret used for Basic Auth against api.razorpay.com")
+    RAZORPAY_ALLOW_LIVE_MODE: bool = Field(default=False, description="Fail-closed guard: must be explicitly True to permit a live (non-test) RAZORPAY_KEY_ID against the real Razorpay API")
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 settings = Settings()

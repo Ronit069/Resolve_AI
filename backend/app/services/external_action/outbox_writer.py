@@ -40,6 +40,7 @@ from app.services.external_action.contest_amount_gate import validate_contest_am
 from app.services.external_action.contest_summary_gate import validate_contest_summary
 from app.services.external_action.evidence_mapping_gate import evaluate_evidence_for_contest, EvidenceType
 from app.services.external_action.contest_submission_action_gate import determine_contest_submission_action
+from app.services.external_action.evidence_completeness_gate import check_minimum_evidence_for_submit
 from app.services.review.dual_control import requires_dual_approval
 
 from app.models.module_c import EvidenceDocument
@@ -54,6 +55,8 @@ class GateCheckSummary:
     h08_all_documents_eligible: bool
     h08_reason: Optional[str]
     h10_action: Optional[str]  # "submit" | "draft"
+    h11_allowed: bool  # only meaningful when h10_action == "submit"; True (vacuous) for "draft"
+    h11_reason: Optional[str]
     h12_allowed: bool
     h12_reason: Optional[str]
     h05_dual_control_required: Optional[bool]  # informational only — not re-decided, see module docstring
@@ -206,6 +209,18 @@ def write_outbox_for_package(
     # H-10: fresh draft-vs-submit determination.
     h10 = determine_contest_submission_action(db, case_id, current_time=current_time)
 
+    # H-11: minimum evidence for submit — a real external Razorpay
+    # precondition (a contest submission cannot reference zero evidence
+    # documents). Only meaningful, and only checked, when H-10 has
+    # already determined action == "submit"; a draft carries no such
+    # requirement.
+    h11_allowed = True
+    h11_reason = None
+    if h10.action == "submit":
+        h11 = check_minimum_evidence_for_submit(db, case_id, package.id, current_time=current_time)
+        h11_allowed = h11.allowed
+        h11_reason = h11.reason
+
     # H-05: composed for consistency confirmation only — NOT re-decided.
     # The DONE queue state H-10 already requires could only exist today
     # because review.py's dual-control gate at approval time already
@@ -229,13 +244,14 @@ def write_outbox_for_package(
         h07_allowed=h07.allowed, h07_reason=h07.reason,
         h08_all_documents_eligible=h08_all_eligible, h08_reason=h08_reason,
         h10_action=h10.action,
+        h11_allowed=h11_allowed, h11_reason=h11_reason,
         h12_allowed=h12.allowed, h12_reason=h12.reason,
         h05_dual_control_required=h05_required,
     )
 
-    all_gates_pass = h06.allowed and h07.allowed and h12.allowed and h08_all_eligible
+    all_gates_pass = h06.allowed and h07.allowed and h12.allowed and h08_all_eligible and h11_allowed
     if not all_gates_pass:
-        reasons = [r for r in (h06.reason, h07.reason, h12.reason, h08_reason) if r]
+        reasons = [r for r in (h06.reason, h07.reason, h12.reason, h08_reason, h11_reason) if r]
         return OutboxWriteResult(
             written=False, reason="; ".join(reasons) or "Gate validation failed",
             gate_summary=gate_summary, created_outbox_ids=[], skipped_existing_outbox_ids=[],
