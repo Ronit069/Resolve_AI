@@ -89,7 +89,7 @@ def test_no_env_file_committed_or_baked_into_images():
 def test_readme_is_non_empty_and_covers_required_sections():
     readme_path = os.path.join(REPO_ROOT, "README.md")
     assert os.path.getsize(readme_path) > 0
-    with open(readme_path) as f:
+    with open(readme_path, encoding="utf-8") as f:
         content = f.read().lower()
 
     for required in (
