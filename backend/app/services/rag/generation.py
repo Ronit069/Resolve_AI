@@ -21,6 +21,7 @@ from pydantic import BaseModel, ValidationError, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.services.observability.runtime_metrics import track_latency
 from app.models.module_g import (
     ClaimType,
     DraftClaim,
@@ -455,12 +456,13 @@ class LLMGenerationService:
 
         messages = build_prompt_messages(packet)
 
-        response = client.chat.completions.create(
-            model=settings.LLM_MODEL,
-            messages=messages,  # type: ignore[arg-type]
-            temperature=settings.LLM_TEMPERATURE,
-            response_format={"type": "json_object"},
-        )
+        with track_latency("llm"):
+            response = client.chat.completions.create(
+                model=settings.LLM_MODEL,
+                messages=messages,  # type: ignore[arg-type]
+                temperature=settings.LLM_TEMPERATURE,
+                response_format={"type": "json_object"},
+            )
 
         content = response.choices[0].message.content
         if not content:

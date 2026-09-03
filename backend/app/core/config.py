@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_SECRET: str = Field(..., description="Razorpay API key secret used for Basic Auth against api.razorpay.com")
     RAZORPAY_ALLOW_LIVE_MODE: bool = Field(default=False, description="Fail-closed guard: must be explicitly True to permit a live (non-test) RAZORPAY_KEY_ID against the real Razorpay API")
 
+    # Module L: MLflow experiment tracking (local/self-hosted only per frozen PO decision).
+    # Defaults to a local file store so training scripts work with zero external service.
+    MLFLOW_TRACKING_URI: str = Field(default="./mlruns", description="MLflow tracking URI — local file store by default, or the local/self-hosted mlflow compose service")
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 settings = Settings()

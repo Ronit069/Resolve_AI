@@ -7,12 +7,14 @@ enrich_dispute_task: Module B enrichment — replaces the Module A placeholder.
 from app.worker.celery_app import celery_app
 from app.core.database import SessionLocal
 from app.providers.base import ProviderUnavailableError
+from app.services.observability.runtime_metrics import track_latency, track_latency_decorator
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+@track_latency_decorator("queue_duration")
 def enrich_dispute_task(self, case_id: str):
     """
     Module B enrichment task. Receives case_id from Module A post-commit dispatch.
@@ -85,6 +87,7 @@ def enrich_dispute_task(self, case_id: str):
         db.close()
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=10)
+@track_latency_decorator("queue_duration")
 def scan_evidence_task(self, document_id: str):
     """
     Background task to scan an uploaded evidence document for malware.
@@ -112,6 +115,7 @@ def scan_evidence_task(self, document_id: str):
         db.close()
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+@track_latency_decorator("queue_duration")
 def process_evidence_document_task(self, case_id: str, document_id: str, merchant_id: str, job_id: str, requested_by: str = None):
     """
     Module D Document Processing Background Task.
@@ -183,12 +187,13 @@ def process_evidence_document_task(self, case_id: str, document_id: str, merchan
                 for p in pages:
                     # OCR only if native text isn't used
                     if not p.native_text_used:
-                        ocr_result = ocr_adapter.perform_ocr(
-                            page_artifact_key=p.page_artifact_key,
-                            width=p.width_px or 10000,
-                            height=p.height_px or 10000,
-                            page_number=p.page_number
-                        )
+                        with track_latency("ocr"):
+                            ocr_result = ocr_adapter.perform_ocr(
+                                page_artifact_key=p.page_artifact_key,
+                                width=p.width_px or 10000,
+                                height=p.height_px or 10000,
+                                page_number=p.page_number
+                            )
                         validate_ocr_result(ocr_result, p.width_px or 10000, p.height_px or 10000)
                         
                         full_text_chunks.append(ocr_result["text"])
