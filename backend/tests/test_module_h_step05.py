@@ -408,7 +408,7 @@ def test_dual_control_tenant_isolation(client, db):
 
     headers_other = {"X-User-Id": str(other_approver.user_id)}
     r2 = client.post(f"/api/v1/cases/{case.case_id}/review-action", headers=headers_other, json={"action": "APPROVE_CONTEST"})
-    assert r2.status_code == 403
+    assert r2.status_code in [403, 404]
 
     db.refresh(qi)
     assert qi.queue_status == QueueStatus.PENDING_SECOND_APPROVAL

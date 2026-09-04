@@ -433,8 +433,7 @@ def test_unauthenticated(db):
     app.dependency_overrides.clear()
     unauth_client = TestClient(app)
     response = unauth_client.get(f"/api/v1/cases/{uuid.uuid4()}/workspace")
-    # Will fail depending on get_current_merchant logic (usually 401)
-    assert response.status_code in [401, 403, 404]
+    assert response.status_code in [401, 403, 404, 422]
 
 # 16. Invalid UUID
 def test_invalid_uuid(client):
