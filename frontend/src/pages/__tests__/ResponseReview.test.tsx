@@ -59,6 +59,13 @@ describe("ResponseReview", () => {
     expect(await screen.findByText("Evidence supports contest.")).toBeInTheDocument();
   });
 
+  it("renders the empty state message on 404 instead of a fatal error", async () => {
+    vi.mocked(getCurrentDraft).mockRejectedValue(new ApiError(404, "No draft found for this case"));
+    renderReview();
+    expect(await screen.findByText("No draft generated for this case yet.")).toBeInTheDocument();
+    expect(screen.queryByText("Not found.")).not.toBeInTheDocument();
+  });
+
   it("hides the submit form for a non-APPROVER role (RoleGate is UX-only)", async () => {
     renderReview("RISK_ANALYST");
     await screen.findByText("Evidence supports contest.");

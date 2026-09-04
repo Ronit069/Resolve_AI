@@ -8,6 +8,7 @@ interface AsyncStateProps<T> {
   isEmpty?: (data: T) => boolean;
   emptyMessage?: ReactNode;
   loadingMessage?: ReactNode;
+  treat404AsEmpty?: boolean;
   children: (data: T) => ReactNode;
 }
 
@@ -35,15 +36,20 @@ export function AsyncState<T>({
   isEmpty,
   emptyMessage = "Nothing to show yet.",
   loadingMessage = "Loading…",
+  treat404AsEmpty = false,
   children,
 }: AsyncStateProps<T>) {
   if (loading) {
     return <div role="status">{loadingMessage}</div>;
   }
-  if (error) {
+  
+  const is404Error = !!error && typeof ApiError !== "undefined" && error instanceof ApiError && error.status === 404;
+  
+  if (error && !(treat404AsEmpty && is404Error)) {
     return <div role="alert">{describeError(error)}</div>;
   }
-  if (data == null || (isEmpty && isEmpty(data))) {
+  
+  if (data == null || (isEmpty && isEmpty(data)) || (treat404AsEmpty && is404Error)) {
     return <div role="status">{emptyMessage}</div>;
   }
   return <>{children(data)}</>;

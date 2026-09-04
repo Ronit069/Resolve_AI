@@ -83,7 +83,13 @@ export function ResponseReview() {
   return (
     <div>
       <h1>Response Review</h1>
-      <AsyncState loading={loading} error={error} data={draft} emptyMessage="No draft generated for this case yet.">
+      <AsyncState 
+        loading={loading} 
+        error={error} 
+        data={draft} 
+        emptyMessage="No draft generated for this case yet."
+        treat404AsEmpty={true}
+      >
         {(d) => (
           <section>
             <h2>Draft Summary</h2>
