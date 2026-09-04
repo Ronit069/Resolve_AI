@@ -46,7 +46,7 @@ DEMO_USERS = [
     ("demo.approver@resolveai.local", "APPROVER"),
     ("demo.model_maintainer@resolveai.local", "MODEL_MAINTAINER"),
 ]
-DEMO_CASE_EXTERNAL_DISPUTE_ID = "demo_disp_seed_001"  # CONTEST path — preserved from the original seed
+DEMO_CASE_EXTERNAL_DISPUTE_ID = "demo_resolveai_seed_001"  # CONTEST path — preserved from the original seed
 
 
 def run_migrations() -> None:
@@ -120,7 +120,7 @@ def seed_reason_code_policy(db):
 
 def seed_demo_case(db):
     """Preserved exactly: the original single demo case (CONTEST path, see seed_demo_cases below)."""
-    return _seed_case_with_dispute(db, DEMO_CASE_EXTERNAL_DISPUTE_ID, "evt_demo_seed_001", amount_minor=500000)
+    return _seed_case_with_dispute(db, DEMO_CASE_EXTERNAL_DISPUTE_ID, "evt_resolveai_seed_001", amount_minor=500000)
 
 
 def _seed_case_with_dispute(db, external_dispute_id, event_id, amount_minor, reason_code="fraud"):
@@ -220,48 +220,59 @@ def _seed_case_outcome_pipeline(db, case_id, evidence_policy, model_version, dec
 
     existing_queue_item = db.query(ReviewQueueItem).filter(ReviewQueueItem.case_id == case_id).first()
     if existing_queue_item is not None:
-        print(f"Review pipeline already seeded for case_id={case_id}")
-        return existing_queue_item
+        # If queue item exists, pipeline is complete. We still return it.
+        # However, to be robust against partial runs, we'll individually check and create each row below.
+        pass
 
     dispute = db.query(Dispute).filter(Dispute.case_id == case_id).first()
 
-    validation_run = EvidenceValidationRun(
-        case_id=case_id, evidence_version="v1", policy_version_id=evidence_policy.policy_version_id,
-        status=EValidationRunStatus.COMPLETED, started_at=datetime.now(timezone.utc),
-        idempotency_key=f"val_demo_{case_id}",
-    )
-    db.add(validation_run)
-    db.flush()
+    validation_run = db.query(EvidenceValidationRun).filter(EvidenceValidationRun.case_id == case_id).first()
+    if not validation_run:
+        validation_run = EvidenceValidationRun(
+            case_id=case_id, evidence_version="v1", policy_version_id=evidence_policy.policy_version_id,
+            status=EValidationRunStatus.COMPLETED, started_at=datetime.now(timezone.utc),
+            idempotency_key=f"val_demo_{case_id}",
+        )
+        db.add(validation_run)
+        db.flush()
 
-    snapshot = CaseFeatureSnapshot(
-        case_id=case_id, validation_run_id=validation_run.id, feature_schema_version="v1",
-        feature_hash=f"hash_demo_{case_id}", features_json={"amount": float(dispute.amount_minor)},
-        is_current=True,
-    )
-    db.add(snapshot)
-    db.flush()
+    snapshot = db.query(CaseFeatureSnapshot).filter(CaseFeatureSnapshot.case_id == case_id).first()
+    if not snapshot:
+        snapshot = CaseFeatureSnapshot(
+            case_id=case_id, validation_run_id=validation_run.id, feature_schema_version="v1",
+            feature_hash=f"hash_demo_{case_id}", features_json={"amount": float(dispute.amount_minor)},
+            is_current=True,
+        )
+        db.add(snapshot)
+        db.flush()
 
-    prediction = RiskPrediction(
-        case_id=case_id, feature_snapshot_id=snapshot.id, model_version_id=model_version.id,
-        decision_policy_id=decision_policy.id, raw_score=0.9, calibrated_probability=0.9,
-        recommendation=recommendation, hard_block=hard_block, idempotency_key=f"pred_demo_{case_id}",
-    )
-    db.add(prediction)
-    db.flush()
+    prediction = db.query(RiskPrediction).filter(RiskPrediction.case_id == case_id).first()
+    if not prediction:
+        prediction = RiskPrediction(
+            case_id=case_id, feature_snapshot_id=snapshot.id, model_version_id=model_version.id,
+            decision_policy_id=decision_policy.id, raw_score=0.9, calibrated_probability=0.9,
+            recommendation=recommendation, hard_block=hard_block, idempotency_key=f"pred_demo_{case_id}",
+        )
+        db.add(prediction)
+        db.flush()
 
-    queue_item = ReviewQueueItem(
-        case_id=case_id, prediction_id=prediction.id, priority_score=100,
-        queue_status=QueueStatus.DONE if finalizing_action else QueueStatus.PENDING,
-        respond_by=dispute.respond_by,
-    )
-    db.add(queue_item)
-    db.flush()
+    queue_item = db.query(ReviewQueueItem).filter(ReviewQueueItem.case_id == case_id).first()
+    if not queue_item:
+        queue_item = ReviewQueueItem(
+            case_id=case_id, prediction_id=prediction.id, priority_score=100,
+            queue_status=QueueStatus.DONE if finalizing_action else QueueStatus.PENDING,
+            respond_by=dispute.respond_by,
+        )
+        db.add(queue_item)
+        db.flush()
 
     if finalizing_action is not None:
-        db.add(ReviewAction(
-            queue_item_id=queue_item.id, case_id=case_id, reviewer_id=reviewer.user_id,
-            action=finalizing_action,
-        ))
+        action = db.query(ReviewAction).filter(ReviewAction.queue_item_id == queue_item.id).first()
+        if not action:
+            db.add(ReviewAction(
+                queue_item_id=queue_item.id, case_id=case_id, reviewer_id=reviewer.user_id,
+                action=finalizing_action,
+            ))
 
     db.commit()
     db.refresh(queue_item)
@@ -301,7 +312,7 @@ def seed_demo_cases(db, evidence_policy, model_version, decision_policy):
     # 2. REVIEW path: recommendation=REVIEW, left PENDING in the queue —
     # the canonical "awaiting human decision" state. No decision is
     # fabricated for this case.
-    case2_id = _seed_case_with_dispute(db, "demo_disp_seed_002", "evt_demo_seed_002", amount_minor=300000)
+    case2_id = _seed_case_with_dispute(db, "demo_resolveai_seed_002", "evt_resolveai_seed_002", amount_minor=300000)
     if case2_id:
         _seed_case_outcome_pipeline(
             db, case2_id, evidence_policy, model_version, decision_policy,
@@ -312,7 +323,7 @@ def seed_demo_cases(db, evidence_policy, model_version, decision_policy):
     # 3. ACCEPT / missing-evidence path: recommendation=ACCEPT, finalized
     # APPROVE_ACCEPT — no override needed (review.py's own H-18 gate only
     # requires an override for ACCEPT+APPROVE_CONTEST, not ACCEPT+APPROVE_ACCEPT).
-    case3_id = _seed_case_with_dispute(db, "demo_disp_seed_003", "evt_demo_seed_003", amount_minor=150000)
+    case3_id = _seed_case_with_dispute(db, "demo_resolveai_seed_003", "evt_resolveai_seed_003", amount_minor=150000)
     if case3_id:
         _seed_case_outcome_pipeline(
             db, case3_id, evidence_policy, model_version, decision_policy,

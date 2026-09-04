@@ -421,6 +421,6 @@ def test_seed_demo_cases_are_three_distinct_and_idempotent():
         action = db.query(ReviewAction).filter(ReviewAction.queue_item_id == queue_item.id).first()
         return prediction.recommendation, queue_item.queue_status, (action.action if action else None)
 
-    assert _state("demo_disp_seed_001") == ("CONTEST", QueueStatus.DONE, ReviewActionEnum.APPROVE_CONTEST)
-    assert _state("demo_disp_seed_002") == ("REVIEW", QueueStatus.PENDING, None)
-    assert _state("demo_disp_seed_003") == ("ACCEPT", QueueStatus.DONE, ReviewActionEnum.APPROVE_ACCEPT)
+    assert _state("demo_resolveai_seed_001") == ("CONTEST", QueueStatus.DONE, ReviewActionEnum.APPROVE_CONTEST)
+    assert _state("demo_resolveai_seed_002") == ("REVIEW", QueueStatus.PENDING, None)
+    assert _state("demo_resolveai_seed_003") == ("ACCEPT", QueueStatus.DONE, ReviewActionEnum.APPROVE_ACCEPT)
