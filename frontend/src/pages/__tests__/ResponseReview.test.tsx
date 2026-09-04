@@ -3,11 +3,12 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { ResponseReview } from "../ResponseReview";
 import { IdentityProvider } from "../../state/IdentityContext";
-import { getCurrentDraft, submitReviewAction, ApiError } from "../../api/client";
+import { getCurrentDraft, submitReviewAction, generateDraft, ApiError } from "../../api/client";
 
 vi.mock("../../api/client", () => ({
   getCurrentDraft: vi.fn(),
   submitReviewAction: vi.fn(),
+  generateDraft: vi.fn(),
   setApiIdentity: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
@@ -64,6 +65,32 @@ describe("ResponseReview", () => {
     renderReview();
     expect(await screen.findByText("No draft generated for this case yet.")).toBeInTheDocument();
     expect(screen.queryByText("Not found.")).not.toBeInTheDocument();
+  });
+
+  it("calls generateDraft and refreshes when 'Generate AI Draft' is clicked", async () => {
+    // Start with empty state
+    vi.mocked(getCurrentDraft).mockRejectedValueOnce(new ApiError(404, "No draft"));
+    vi.mocked(generateDraft).mockResolvedValueOnce({
+      draft_id: "dnew", case_id: "c1", guardrail_status: "PASS", summary: "New generated summary",
+      contest_amount_minor: "10000", draft_json: {}, created_at: "2026-09-02T00:00:00Z",
+    });
+    // Second call returns the populated draft
+    vi.mocked(getCurrentDraft).mockResolvedValueOnce({
+      draft_id: "dnew", case_id: "c1", guardrail_status: "PASS", summary: "New generated summary",
+      contest_amount_minor: "10000", draft_json: {}, created_at: "2026-09-02T00:00:00Z",
+    });
+
+    renderReview();
+    
+    // Wait for the empty state
+    const btn = await screen.findByRole("button", { name: "Generate AI Draft" });
+    expect(btn).toBeInTheDocument();
+
+    fireEvent.click(btn);
+
+    // Verify it updates state and shows new summary
+    expect(generateDraft).toHaveBeenCalledWith("c1");
+    expect(await screen.findByText("New generated summary")).toBeInTheDocument();
   });
 
   it("hides the submit form for a non-APPROVER role (RoleGate is UX-only)", async () => {

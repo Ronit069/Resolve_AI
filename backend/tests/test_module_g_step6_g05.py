@@ -24,6 +24,7 @@ from app.models.module_d import *  # noqa: F401,F403
 from app.models.module_e import *  # noqa: F401,F403
 from app.models.module_f import ModelVersion, ModelDecisionPolicy, RiskPrediction  # noqa: F401
 from app.core.database import Base
+from app.core.config import settings
 from app.models.module_g import (
     ClaimType,
     DraftClaim,
@@ -353,13 +354,13 @@ def test_correct_llm_model_called(db):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = json.dumps(valid_resp)
 
-    with patch("openai.OpenAI") as MockClient:
+    with patch("groq.Groq") as MockClient:
         instance = MockClient.return_value
         instance.chat.completions.create.return_value = mock_response
         svc = LLMGenerationService(db)
         svc._call_llm(packet)
         call_kwargs = instance.chat.completions.create.call_args
-        assert call_kwargs.kwargs["model"] == "gpt-4o-mini"
+        assert call_kwargs.kwargs["model"] == settings.GROQ_MODEL
         # temperature must be 0.0 (deterministic)
         assert call_kwargs.kwargs["temperature"] == 0.0
 
@@ -375,7 +376,7 @@ def test_valid_llm_response_accepted(db):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = json.dumps(valid_resp)
 
-    with patch("openai.OpenAI") as MockClient:
+    with patch("groq.Groq") as MockClient:
         instance = MockClient.return_value
         instance.chat.completions.create.return_value = mock_response
 
@@ -400,7 +401,7 @@ def test_malformed_llm_response_rejected(db):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = "NOT JSON AT ALL $$$$"
 
-    with patch("openai.OpenAI") as MockClient:
+    with patch("groq.Groq") as MockClient:
         instance = MockClient.return_value
         instance.chat.completions.create.return_value = mock_response
         svc = LLMGenerationService(db)
@@ -422,7 +423,7 @@ def test_malformed_llm_response_rejected(db):
 
 def test_llm_provider_failure_uses_fallback(db):
     packet = _make_packet()
-    with patch("openai.OpenAI") as MockClient:
+    with patch("groq.Groq") as MockClient:
         instance = MockClient.return_value
         instance.chat.completions.create.side_effect = Exception("network error")
 
@@ -460,7 +461,7 @@ def test_citation_provenance_in_draft_claims(db):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = json.dumps(valid_resp)
 
-    with patch("openai.OpenAI") as MockClient:
+    with patch("groq.Groq") as MockClient:
         instance = MockClient.return_value
         instance.chat.completions.create.return_value = mock_response
         svc = LLMGenerationService(db)
@@ -521,7 +522,7 @@ def test_draft_only_no_submission(db):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = json.dumps(valid_resp)
 
-    with patch("openai.OpenAI") as MockClient:
+    with patch("groq.Groq") as MockClient:
         instance = MockClient.return_value
         instance.chat.completions.create.return_value = mock_response
         svc = LLMGenerationService(db)
@@ -548,7 +549,7 @@ def test_audit_persistence_g7_g8_g9_g10(db):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = json.dumps(valid_resp)
 
-    with patch("openai.OpenAI") as MockClient:
+    with patch("groq.Groq") as MockClient:
         instance = MockClient.return_value
         instance.chat.completions.create.return_value = mock_response
         svc = LLMGenerationService(db)
@@ -597,7 +598,7 @@ def test_transaction_rollback_on_failure(db):
         raise RuntimeError("Simulated DB failure")
 
     raised = False
-    with patch("openai.OpenAI") as MockClient:
+    with patch("groq.Groq") as MockClient:
         instance = MockClient.return_value
         instance.chat.completions.create.return_value = mock_response
         svc = LLMGenerationService(db)
@@ -625,7 +626,7 @@ def test_zero_openai_embedding_calls(db):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = json.dumps(valid_resp)
 
-    with patch("openai.OpenAI") as MockClient:
+    with patch("groq.Groq") as MockClient:
         instance = MockClient.return_value
         instance.chat.completions.create.return_value = mock_response
         svc = LLMGenerationService(db)
@@ -656,7 +657,7 @@ def test_f14_recommendation_overrides_llm(db):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = json.dumps(resp)
 
-    with patch("openai.OpenAI") as MockClient:
+    with patch("groq.Groq") as MockClient:
         instance = MockClient.return_value
         instance.chat.completions.create.return_value = mock_response
         svc = LLMGenerationService(db)
@@ -692,7 +693,7 @@ def test_grounding_guardrail_invalid_source_ref(db):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = json.dumps(resp)
 
-    with patch("openai.OpenAI") as MockClient:
+    with patch("groq.Groq") as MockClient:
         instance = MockClient.return_value
         instance.chat.completions.create.return_value = mock_response
         svc = LLMGenerationService(db)
@@ -735,3 +736,65 @@ def test_holdout_not_accessed():
     assert "HOLDOUT" not in ctx_src
     assert "HOLDOUT" not in gen_src
 
+
+# ===========================================================================
+# REGRESSION: CONTRADICTION guardrail details must always be a dict (never list)
+# Regression for: H02GuardrailResultSchema.details_json Input should be a
+# valid dictionary -- input_value=[], input_type=list
+# (Case Workspace 500 caused by CONTRADICTION PASS storing [] instead of {})
+# ===========================================================================
+
+def test_contradiction_pass_details_is_dict():
+    """
+    REGRESSION: When no contradictions exist, run_guardrails must store
+    details={} (dict) for the CONTRADICTION check, never [] (list).
+    H02GuardrailResultSchema.details_json is Optional[Dict[str, Any]].
+    """
+    packet = _make_packet()
+    # A valid LLM output that matches F14 recommendation -- no contradiction
+    draft_output = {
+        "summary": "We contest this dispute.",
+        "recommended_action": "CONTEST",  # matches packet recommendation
+        "contest_amount_minor": None,
+        "evidence_document_ids": [],
+        "claims": [{"claim": "Delivery confirmed.", "fact_refs": ["recommendation"], "source_refs": []}],
+        "missing_or_uncertain": [],
+    }
+    _, checks = run_guardrails(draft_output, packet)
+    contradiction_check = next(c for c in checks if c["type"] == GuardrailCheckType.CONTRADICTION)
+    assert contradiction_check["result"] == "PASS"
+    details = contradiction_check["details"]
+    assert isinstance(details, dict), (
+        f"CONTRADICTION PASS details must be a dict for H02GuardrailResultSchema compatibility, "
+        f"got {type(details).__name__!r}: {details!r}"
+    )
+
+
+def test_contradiction_fail_details_is_dict_with_contradictions_key():
+    """
+    REGRESSION: When contradictions exist, run_guardrails must store
+    details={"contradictions": [...]} (dict) not a raw list.
+    H02GuardrailResultSchema.details_json is Optional[Dict[str, Any]].
+    """
+    packet = _make_packet()
+    # LLM output where recommended_action contradicts F14 recommendation
+    draft_output = {
+        "summary": "We accept this dispute.",
+        "recommended_action": "ACCEPT",  # contradicts packet recommendation CONTEST
+        "contest_amount_minor": None,
+        "evidence_document_ids": [],
+        "claims": [{"claim": "Refund issued.", "fact_refs": ["recommendation"], "source_refs": []}],
+        "missing_or_uncertain": [],
+    }
+    _, checks = run_guardrails(draft_output, packet)
+    contradiction_check = next(c for c in checks if c["type"] == GuardrailCheckType.CONTRADICTION)
+    assert contradiction_check["result"] == "FAIL"
+    details = contradiction_check["details"]
+    assert isinstance(details, dict), (
+        f"CONTRADICTION FAIL details must be a dict, got {type(details).__name__!r}: {details!r}"
+    )
+    assert "contradictions" in details, (
+        f"CONTRADICTION FAIL details dict must have 'contradictions' key, got: {details!r}"
+    )
+    assert isinstance(details["contradictions"], list)
+    assert len(details["contradictions"]) > 0

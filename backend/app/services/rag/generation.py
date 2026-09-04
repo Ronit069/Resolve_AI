@@ -196,11 +196,11 @@ def run_guardrails(
 
     if contradiction_details:
         checks.append({"type": GuardrailCheckType.CONTRADICTION, "result": "FAIL",
-                        "details": contradiction_details})
+                        "details": {"contradictions": contradiction_details}})
         worst = GuardrailStatus.FAIL
     else:
         checks.append({"type": GuardrailCheckType.CONTRADICTION, "result": "PASS",
-                        "details": []})
+                        "details": {}})
 
     # -- G-12: Citation coverage ----------------------------------------------
     claims = draft_output.get("claims", [])
@@ -442,15 +442,14 @@ class LLMGenerationService:
 
     def _call_llm(self, packet: FactPacket) -> tuple[Dict[str, Any], bool]:
         """
-        Call OpenAI Chat Completions in JSON mode.
-        [ENGINEERING INFERENCE] OpenAI confirmed as provider (already in requirements.txt).
+        Call Groq Chat Completions in JSON mode.
         Returns (parsed_dict, used_fallback).
         Raises on any API or parse error -- caller handles fallback.
         """
-        import openai
+        import groq
 
-        client = openai.OpenAI(
-            api_key=settings.OPENAI_API_KEY,
+        client = groq.Groq(
+            api_key=settings.GROQ_API_KEY,
             timeout=float(settings.LLM_TIMEOUT_SECONDS),
         )
 
@@ -458,7 +457,7 @@ class LLMGenerationService:
 
         with track_latency("llm"):
             response = client.chat.completions.create(
-                model=settings.LLM_MODEL,
+                model=settings.GROQ_MODEL,
                 messages=messages,  # type: ignore[arg-type]
                 temperature=settings.LLM_TEMPERATURE,
                 response_format={"type": "json_object"},

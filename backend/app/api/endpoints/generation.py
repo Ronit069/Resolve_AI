@@ -1,4 +1,4 @@
-﻿"""
+"""
 G-05 API Endpoints
 [BLUEPRINT REQUIREMENT] POST /api/v1/cases/{id}/generate-draft
 [BLUEPRINT REQUIREMENT] GET  /api/v1/cases/{id}/draft
@@ -28,7 +28,7 @@ router = APIRouter()
 
 
 class GenerateDraftRequest(BaseModel):
-    prediction_id: str
+    prediction_id: Optional[str] = None
     retrieval_run_id: Optional[str] = None
 
 
@@ -60,15 +60,23 @@ def generate_draft(
         raise HTTPException(status_code=403, detail="Access denied: cross-tenant")
 
     # 2. Resolve prediction
-    try:
-        pred_uuid = uuid.UUID(req.prediction_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid prediction_id UUID")
+    if req.prediction_id:
+        try:
+            pred_uuid = uuid.UUID(req.prediction_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid prediction_id UUID")
 
-    prediction = db.query(RiskPrediction).filter(
-        RiskPrediction.id == pred_uuid,
-        RiskPrediction.case_id == case_uuid,
-    ).first()
+        prediction = db.query(RiskPrediction).filter(
+            RiskPrediction.id == pred_uuid,
+            RiskPrediction.case_id == case_uuid,
+        ).first()
+    else:
+        prediction = (
+            db.query(RiskPrediction)
+            .filter(RiskPrediction.case_id == case_uuid)
+            .order_by(RiskPrediction.created_at.desc())
+            .first()
+        )
     if not prediction:
         raise HTTPException(status_code=404, detail="Prediction not found for this case")
 

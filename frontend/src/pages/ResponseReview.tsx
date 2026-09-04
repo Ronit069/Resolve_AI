@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
-import { getCurrentDraft, submitReviewAction, ApiError } from "../api/client";
+import { getCurrentDraft, generateDraft, submitReviewAction, ApiError } from "../api/client";
 import type { DraftResponse, ReviewActionEnum, ReviewActionResponse } from "../api/types";
 import { AsyncState } from "../components/AsyncState";
 import { RoleGate } from "../components/RoleGate";
@@ -32,6 +32,7 @@ export function ResponseReview() {
   const [draft, setDraft] = useState<DraftResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
+  const [generating, setGenerating] = useState(false);
 
   const [action, setAction] = useState<ReviewActionEnum>("APPROVE_CONTEST");
   const [overrideReasonCode, setOverrideReasonCode] = useState("");
@@ -51,6 +52,21 @@ export function ResponseReview() {
       cancelled = true;
     };
   }, [caseId]);
+
+  const handleGenerate = async () => {
+    if (!caseId) return;
+    setGenerating(true);
+    setError(null);
+    try {
+      await generateDraft(caseId);
+      const res = await getCurrentDraft(caseId);
+      setDraft(res);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -87,7 +103,16 @@ export function ResponseReview() {
         loading={loading} 
         error={error} 
         data={draft} 
-        emptyMessage="No draft generated for this case yet."
+        emptyMessage={
+          <div>
+            <p>No draft generated for this case yet.</p>
+            <RoleGate allow={["APPROVER"]}>
+              <button onClick={handleGenerate} disabled={generating}>
+                {generating ? "Generating..." : "Generate AI Draft"}
+              </button>
+            </RoleGate>
+          </div>
+        }
         treat404AsEmpty={true}
       >
         {(d) => (

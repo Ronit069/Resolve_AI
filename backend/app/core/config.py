@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = Field("sk-dummy", description="OpenAI API Key")
     EMBEDDING_BATCH_SIZE: int = Field(100, description="Batch size for embedding generation")
     
+    # Groq Settings
+    GROQ_API_KEY: str = Field(default="gsk_dummy", description="Groq API Key")
+    GROQ_MODEL: str = Field(default="openai/gpt-oss-20b", description="Groq model to use")
+    
     # Features
     ENABLE_DEV_ENDPOINTS: bool = Field(default=False, description="Enable development endpoints")
 

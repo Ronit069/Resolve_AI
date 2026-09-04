@@ -78,6 +78,13 @@ export function getCurrentDraft(caseId: string): Promise<DraftResponse> {
   return request(`/api/v1/cases/${caseId}/draft`);
 }
 
+export function generateDraft(caseId: string): Promise<DraftResponse> {
+  return request(`/api/v1/cases/${caseId}/generate-draft`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export function submitReviewAction(
   caseId: string,
   payload: ReviewActionRequest
