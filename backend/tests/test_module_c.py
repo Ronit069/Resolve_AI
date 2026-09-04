@@ -103,8 +103,9 @@ def test_valid_pdf_upload(mock_scan, mock_storage, case_fixture, setup_db: Sessi
     
     response = client.post(
         f"/api/v1/cases/{case_fixture['case'].case_id}/evidence",
-        data={"evidence_type": "INVOICE", "user_id": str(case_fixture['user'].user_id)},
-        files={"file": create_upload_file(pdf_content, "invoice.pdf")}
+        data={"evidence_type": "INVOICE"},
+        files={"file": create_upload_file(pdf_content, "invoice.pdf")},
+        headers={"X-User-Id": str(case_fixture['user'].user_id)}
     )
     
     assert response.status_code == 202
@@ -125,8 +126,9 @@ def test_valid_jpeg_upload(mock_scan, mock_storage, case_fixture, setup_db: Sess
     
     response = client.post(
         f"/api/v1/cases/{case_fixture['case'].case_id}/evidence",
-        data={"evidence_type": "INVOICE", "user_id": str(case_fixture['user'].user_id)},
-        files={"file": create_upload_file(jpeg_content, "photo.jpg")}
+        data={"evidence_type": "INVOICE"},
+        files={"file": create_upload_file(jpeg_content, "photo.jpg")},
+        headers={"X-User-Id": str(case_fixture['user'].user_id)}
     )
     assert response.status_code == 202
     assert response.json()["mime_type"] == "image/jpeg"
@@ -139,8 +141,9 @@ def test_valid_png_upload(mock_scan, mock_storage, case_fixture, setup_db: Sessi
     
     response = client.post(
         f"/api/v1/cases/{case_fixture['case'].case_id}/evidence",
-        data={"evidence_type": "INVOICE", "user_id": str(case_fixture['user'].user_id)},
-        files={"file": create_upload_file(png_content, "photo.png")}
+        data={"evidence_type": "INVOICE"},
+        files={"file": create_upload_file(png_content, "photo.png")},
+        headers={"X-User-Id": str(case_fixture['user'].user_id)}
     )
     assert response.status_code == 202
     assert response.json()["mime_type"] == "image/png"
@@ -149,8 +152,9 @@ def test_invalid_magic_bytes(case_fixture, setup_db: Session):
     fake_pdf = b"MZ\x90\x00\x03\x00\x00\x00This is an executable"
     response = client.post(
         f"/api/v1/cases/{case_fixture['case'].case_id}/evidence",
-        data={"evidence_type": "INVOICE", "user_id": str(case_fixture['user'].user_id)},
-        files={"file": create_upload_file(fake_pdf, "invoice.pdf", "application/pdf")}
+        data={"evidence_type": "INVOICE"},
+        files={"file": create_upload_file(fake_pdf, "invoice.pdf", "application/pdf")},
+        headers={"X-User-Id": str(case_fixture['user'].user_id)}
     )
     assert response.status_code == 415
 
@@ -159,8 +163,9 @@ def test_extension_content_mismatch(case_fixture, setup_db: Session):
     # Uploading JPEG content but spoofing filename extension and content type
     response = client.post(
         f"/api/v1/cases/{case_fixture['case'].case_id}/evidence",
-        data={"evidence_type": "INVOICE", "user_id": str(case_fixture['user'].user_id)},
-        files={"file": create_upload_file(jpeg_content, "malware.exe", "application/x-msdownload")}
+        data={"evidence_type": "INVOICE"},
+        files={"file": create_upload_file(jpeg_content, "malware.exe", "application/x-msdownload")},
+        headers={"X-User-Id": str(case_fixture['user'].user_id)}
     )
     # The system should trust the magic bytes and accept it as JPEG, completely ignoring the extension/content-type!
     assert response.status_code == 202
@@ -176,8 +181,9 @@ def test_oversized_file(case_fixture, setup_db: Session):
         large_content = b"%PDF-1.4" + b"A" * 9000 # Larger than 8192 chunk size to trigger while loop
         response = client.post(
             f"/api/v1/cases/{case_fixture['case'].case_id}/evidence",
-            data={"evidence_type": "INVOICE", "user_id": str(case_fixture['user'].user_id)},
-            files={"file": create_upload_file(large_content, "large.pdf")}
+            data={"evidence_type": "INVOICE"},
+            files={"file": create_upload_file(large_content, "large.pdf")},
+            headers={"X-User-Id": str(case_fixture['user'].user_id)}
         )
         assert response.status_code == 413
 
@@ -190,8 +196,9 @@ def test_sha256_correctness(mock_scan, mock_storage, case_fixture, setup_db: Ses
     
     response = client.post(
         f"/api/v1/cases/{case_fixture['case'].case_id}/evidence",
-        data={"evidence_type": "INVOICE", "user_id": str(case_fixture['user'].user_id)},
-        files={"file": create_upload_file(content, "test.pdf")}
+        data={"evidence_type": "INVOICE"},
+        files={"file": create_upload_file(content, "test.pdf")},
+        headers={"X-User-Id": str(case_fixture['user'].user_id)}
     )
     assert response.status_code == 202
     doc = setup_db.query(EvidenceDocument).filter_by(document_id=uuid.UUID(response.json()["document_id"])).first()
@@ -205,14 +212,16 @@ def test_duplicate_upload_same_case(mock_scan, mock_storage, case_fixture, setup
     
     client.post(
         f"/api/v1/cases/{case_fixture['case'].case_id}/evidence",
-        data={"evidence_type": "INVOICE", "user_id": str(case_fixture['user'].user_id)},
-        files={"file": create_upload_file(pdf_content, "test.pdf")}
+        data={"evidence_type": "INVOICE"},
+        files={"file": create_upload_file(pdf_content, "test.pdf")},
+        headers={"X-User-Id": str(case_fixture['user'].user_id)}
     )
     
     response2 = client.post(
         f"/api/v1/cases/{case_fixture['case'].case_id}/evidence",
-        data={"evidence_type": "PROOF_OF_DELIVERY", "user_id": str(case_fixture['user'].user_id)},
-        files={"file": create_upload_file(pdf_content, "test.pdf")}
+        data={"evidence_type": "PROOF_OF_DELIVERY"},
+        files={"file": create_upload_file(pdf_content, "test.pdf")},
+        headers={"X-User-Id": str(case_fixture['user'].user_id)}
     )
     assert response2.status_code == 409
 
@@ -231,13 +240,15 @@ def test_same_content_different_cases_allowed(mock_scan, mock_storage, setup_db:
     pdf_content = b"%PDF-1.4\nCross case duplicate"
     r1 = client.post(
         f"/api/v1/cases/{case1.case_id}/evidence",
-        data={"evidence_type": "INVOICE", "user_id": str(user.user_id)},
-        files={"file": create_upload_file(pdf_content, "test.pdf")}
+        data={"evidence_type": "INVOICE"},
+        files={"file": create_upload_file(pdf_content, "test.pdf")},
+        headers={"X-User-Id": str(user.user_id)}
     )
     r2 = client.post(
         f"/api/v1/cases/{case2.case_id}/evidence",
-        data={"evidence_type": "INVOICE", "user_id": str(user.user_id)},
-        files={"file": create_upload_file(pdf_content, "test.pdf")}
+        data={"evidence_type": "INVOICE"},
+        files={"file": create_upload_file(pdf_content, "test.pdf")},
+        headers={"X-User-Id": str(user.user_id)}
     )
     
     assert r1.status_code == 202
@@ -250,8 +261,9 @@ def test_path_traversal_filename(mock_scan, mock_storage, case_fixture, setup_db
     pdf_content = b"%PDF-1.4\nTraversal"
     response = client.post(
         f"/api/v1/cases/{case_fixture['case'].case_id}/evidence",
-        data={"evidence_type": "INVOICE", "user_id": str(case_fixture['user'].user_id)},
-        files={"file": create_upload_file(pdf_content, "../../../etc/passwd.pdf")}
+        data={"evidence_type": "INVOICE"},
+        files={"file": create_upload_file(pdf_content, "../../../etc/passwd.pdf")},
+        headers={"X-User-Id": str(case_fixture['user'].user_id)}
     )
     assert response.status_code == 202
     doc = setup_db.query(EvidenceDocument).filter_by(document_id=uuid.UUID(response.json()["document_id"])).first()
@@ -264,8 +276,9 @@ def test_storage_failure_cleanup(mock_storage, case_fixture, setup_db: Session):
     
     response = client.post(
         f"/api/v1/cases/{case_fixture['case'].case_id}/evidence",
-        data={"evidence_type": "INVOICE", "user_id": str(case_fixture['user'].user_id)},
-        files={"file": create_upload_file(b"%PDF-1.4\nFail", "fail.pdf")}
+        data={"evidence_type": "INVOICE"},
+        files={"file": create_upload_file(b"%PDF-1.4\nFail", "fail.pdf")},
+        headers={"X-User-Id": str(case_fixture['user'].user_id)}
     )
     assert response.status_code == 500
 
@@ -392,11 +405,16 @@ def test_cross_tenant_evidence_access(setup_db: Session):
     # user2 tries to access case from merchant 1
     case1 = setup_db.query(Case).filter_by(external_dispute_id="disp_state").first() or setup_db.query(Case).first()
     
-    response = client.get(f"/api/v1/cases/{case1.case_id}/evidence", params={"user_id": str(user2.user_id)})
-    assert response.status_code == 403
+    response = client.get(f"/api/v1/cases/{case1.case_id}/evidence", headers={"X-User-Id": str(user2.user_id)})
+    # D-02 fix: tenant isolation now happens at the router boundary via the
+    # canonical get_current_merchant dependency, which treats cross-tenant
+    # access the same as not-found (404) — the same anti-enumeration
+    # convention already used by document-intelligence / audit.py, rather
+    # than the old service-layer 403.
+    assert response.status_code == 404
 
 def test_evidence_listing_sanitized(case_fixture, setup_db: Session):
-    response = client.get(f"/api/v1/cases/{case_fixture['case'].case_id}/evidence", params={"user_id": str(case_fixture['user'].user_id)})
+    response = client.get(f"/api/v1/cases/{case_fixture['case'].case_id}/evidence", headers={"X-User-Id": str(case_fixture['user'].user_id)})
     assert response.status_code == 200
     data = response.json()
     assert "evidence" in data

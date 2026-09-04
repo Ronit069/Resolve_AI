@@ -4,29 +4,22 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, s
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.deps import get_current_merchant
+from app.api.deps import get_current_user, get_current_merchant
 from app.schemas.module_c import CaseEvidenceResponse, EvidenceDocumentResponse, EvidenceSummarySchema, EvidenceType
 from app.services.evidence import upload_evidence_to_case, list_case_evidence
 from app.services.requirements import evaluate_case_evidence_coverage, setup_default_requirements
-from app.models.shared import Case, Merchant
+from app.models.shared import Case, Merchant, AppUser
 
 router = APIRouter()
-
-# For the MVP, we assume the user_id is passed as a header or we mock it.
-# Usually this comes from an authentication dependency.
-def get_current_user_id() -> uuid.UUID:
-    # MVP Mock: Replace with actual auth in production
-    # In the tests, we'll bypass or inject this.
-    # For now, we will expect it to be passed or we use a dummy one if not provided, but tests will override this.
-    pass
 
 @router.post("/{case_id}/evidence", response_model=EvidenceDocumentResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_evidence(
     case_id: uuid.UUID,
     evidence_type: str = Form(...),
     file: UploadFile = File(...),
-    user_id: uuid.UUID = Form(..., description="Mocked authenticated user ID for MVP"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+    current_merchant: Merchant = Depends(get_current_merchant)
 ):
     """
     Upload evidence for a specific case.
@@ -36,27 +29,44 @@ async def upload_evidence(
         ev_type_enum = EvidenceType(evidence_type)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid evidence type.")
-        
+
     setup_default_requirements(db) # Ensure defaults exist for MVP
-    
-    return upload_evidence_to_case(db, case_id, user_id, file, ev_type_enum)
+
+    # Tenant isolation: the case must belong to the authenticated caller's
+    # own (server-derived) merchant, checked BEFORE any file is validated,
+    # stored, or persisted. Cross-tenant access is deliberately
+    # indistinguishable from not-found, matching the existing
+    # anti-enumeration convention used by document-intelligence / audit.py.
+    case = db.query(Case).filter(
+        Case.case_id == case_id,
+        Case.merchant_id == current_merchant.merchant_id,
+    ).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found.")
+
+    return upload_evidence_to_case(db, case_id, current_user.user_id, file, ev_type_enum)
 
 @router.get("/{case_id}/evidence", response_model=CaseEvidenceResponse)
 def get_case_evidence(
     case_id: uuid.UUID,
-    user_id: uuid.UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+    current_merchant: Merchant = Depends(get_current_merchant)
 ):
     """
     List all evidence documents for a case and return the coverage summary.
     """
     setup_default_requirements(db) # Ensure defaults exist for MVP
-    
-    case = db.query(Case).filter(Case.case_id == case_id).first()
+
+    # Tenant isolation: same server-derived merchant check as upload above.
+    case = db.query(Case).filter(
+        Case.case_id == case_id,
+        Case.merchant_id == current_merchant.merchant_id,
+    ).first()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found.")
-        
-    documents = list_case_evidence(db, case_id, user_id)
+
+    documents = list_case_evidence(db, case_id, current_user.user_id)
     
     # Refresh coverage just in case
     coverage = evaluate_case_evidence_coverage(db, case_id)
