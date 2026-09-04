@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import { setApiIdentity } from "../api/client";
 import type { AppUserRole } from "../api/types";
 
@@ -31,12 +31,24 @@ const IdentityContext = createContext<IdentityContextValue | undefined>(undefine
  * decision on authentication.
  */
 export function IdentityProvider({ children }: { children: ReactNode }) {
+  // Read (and synchronously mirror into the API client) during render, via
+  // useState's lazy initializer — this runs once, before IdentityProvider
+  // returns its element tree, so it happens before React ever renders (and
+  // therefore before it can run the mount effect of) any descendant page
+  // component. Doing this from a useEffect instead would run AFTER child
+  // effects (React fires effects child-before-parent), letting a child's
+  // own data-fetching effect race ahead of the API client's identity being
+  // set — invisible in dev because React.StrictMode's double-invoke masks
+  // it, but real in production. See D-01.
   const [userId, setUserIdState] = useState<string | null>(() => {
+    let initial: string | null = null;
     try {
-      return window.localStorage.getItem(USER_ID_KEY);
+      initial = window.localStorage.getItem(USER_ID_KEY);
     } catch {
-      return null;
+      initial = null;
     }
+    setApiIdentity(initial);
+    return initial;
   });
   const [roleLabel, setRoleLabelState] = useState<AppUserRole | null>(() => {
     try {
@@ -46,11 +58,11 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
     }
   });
 
-  useEffect(() => {
-    setApiIdentity(userId);
-  }, [userId]);
-
   const setIdentity = (nextUserId: string | null, nextRole: AppUserRole | null) => {
+    // Synchronous, not effect-driven: an identity switch (e.g. via Login)
+    // must be visible to the API client before any subsequently-mounted
+    // component can fire a request.
+    setApiIdentity(nextUserId);
     setUserIdState(nextUserId);
     setRoleLabelState(nextRole);
     try {
