@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     # Defaults to a local file store so training scripts work with zero external service.
     MLFLOW_TRACKING_URI: str = Field(default="./mlruns", description="MLflow tracking URI — local file store by default, or the local/self-hosted mlflow compose service")
 
+    # Module L: authoritative Step 15 held-out evaluation artifact (read-only).
+    # Matches the existing root-level ML pipeline scripts' own convention of
+    # writing to a plain "artifacts" directory relative to the process's
+    # working directory — same convention as MLFLOW_TRACKING_URI above.
+    MODEL_EVALUATION_ARTIFACT_DIR: str = Field(default="artifacts", description="Directory containing step15_final_holdout_eval_*/final_evaluation.json, written by the repo-root evaluate_holdout_step15.py script")
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 settings = Settings()

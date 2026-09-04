@@ -169,3 +169,46 @@ export interface ReviewActionResponse {
 export interface ApiErrorBody {
   detail?: string | Array<{ msg: string }>;
 }
+
+// ---- Authoritative Step 15 held-out evaluation (Phase 2) ----
+
+export interface EvaluationConfusionMatrix {
+  tp: number;
+  tn: number;
+  fp: number;
+  fn: number;
+}
+
+export interface ModelEvaluationModelProvenance {
+  algorithm: string;
+  run_id: string;
+  model_sha256: string;
+}
+
+export interface ModelEvaluationProvenance {
+  holdout_file: string;
+  holdout_sha256: string;
+  evaluation_timestamp: string;
+  calibration_method: string | null;
+  policy_id: string;
+}
+
+export interface ModelEvaluationResponse {
+  sample_count: number;
+  positive_count: number;
+  negative_count: number;
+  precision: number;
+  recall: number;
+  f1: number;
+  accuracy: number;
+  confusion_matrix: EvaluationConfusionMatrix;
+  false_positive_count: number;
+  expected_cost: number;
+  accept_count: number;
+  review_count: number;
+  contest_count: number;
+  brier_raw: number;
+  brier_calibrated: number;
+  model: ModelEvaluationModelProvenance;
+  evaluation: ModelEvaluationProvenance;
+}

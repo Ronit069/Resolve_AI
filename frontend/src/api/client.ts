@@ -7,6 +7,7 @@ import type {
   ReviewActionRequest,
   ReviewActionResponse,
   ApiErrorBody,
+  ModelEvaluationResponse,
 } from "./types";
 
 // Development-mode identity is attached as a plain X-User-Id header on
@@ -120,4 +121,10 @@ export function getCaseAuditLog(
   if (params.offset != null) query.set("offset", String(params.offset));
   const qs = query.toString();
   return request(`/api/v1/cases/${caseId}/audit-log${qs ? `?${qs}` : ""}`);
+}
+
+// ---- Phase 2: authoritative Step 15 held-out evaluation ----
+
+export function getModelEvaluation(): Promise<ModelEvaluationResponse> {
+  return request("/api/v1/observability/model-evaluation");
 }
