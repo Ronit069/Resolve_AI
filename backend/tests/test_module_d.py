@@ -840,23 +840,29 @@ def test_aggregator_review_required(clean_db):
     assert status.review_required_documents == 1
 
 def test_api_case_intelligence_status(clean_db):
-    from app.models.shared import Case, Merchant
+    from app.models.shared import Case, Merchant, AppUser
     import uuid
     from app.models.module_d import CaseDocumentIntelligenceStatus
     from fastapi.testclient import TestClient
     from app.main import app
-    
+
     client = TestClient(app)
-    
+
     # We need a merchant
     m = Merchant(merchant_id=uuid.uuid4(), name="Test Merchant", external_merchant_id="ext_test_123")
     clean_db.add(m)
     clean_db.commit()
-    
+
+    # Document-intelligence auth gap fix: the endpoint now requires an
+    # authenticated, same-tenant user (see app.api.deps.get_current_merchant).
+    u = AppUser(merchant_id=m.merchant_id, email="test_api_case_intelligence_status@merchant.com", is_active=True)
+    clean_db.add(u)
+    clean_db.commit()
+
     c = Case(case_id=uuid.uuid4(), merchant_id=m.merchant_id, external_dispute_id="dispute_123", source="API")
     clean_db.add(c)
     clean_db.commit()
-    
+
     st = CaseDocumentIntelligenceStatus(
         case_id=c.case_id,
         overall_status="REVIEW_REQUIRED",
@@ -867,8 +873,11 @@ def test_api_case_intelligence_status(clean_db):
     )
     clean_db.add(st)
     clean_db.commit()
-    
-    response = client.get(f"/api/v1/cases/{c.case_id}/document-intelligence")
+
+    response = client.get(
+        f"/api/v1/cases/{c.case_id}/document-intelligence",
+        headers={"X-User-Id": str(u.user_id)},
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["overall_status"] == "REVIEW_REQUIRED"

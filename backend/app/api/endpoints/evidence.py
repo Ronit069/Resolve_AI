@@ -4,10 +4,11 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, s
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.api.deps import get_current_merchant
 from app.schemas.module_c import CaseEvidenceResponse, EvidenceDocumentResponse, EvidenceSummarySchema, EvidenceType
 from app.services.evidence import upload_evidence_to_case, list_case_evidence
 from app.services.requirements import evaluate_case_evidence_coverage, setup_default_requirements
-from app.models.shared import Case
+from app.models.shared import Case, Merchant
 
 router = APIRouter()
 
@@ -86,13 +87,19 @@ def get_case_evidence(
 @router.get("/{case_id}/document-intelligence")
 def get_case_document_intelligence(
     case_id: uuid.UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_merchant: Merchant = Depends(get_current_merchant)
 ):
     from app.models.module_d import CaseDocumentIntelligenceStatus
-    
-    # We should ensure tenant isolation, but since we don't have auth injected fully in MVP here,
-    # we'll just check if the case exists.
-    case = db.query(Case).filter(Case.case_id == case_id).first()
+
+    # Tenant isolation: the case must belong to the authenticated caller's
+    # own (server-derived) merchant. Cross-tenant access is deliberately
+    # indistinguishable from not-found, matching the existing
+    # anti-enumeration convention used by audit.py / review.py.
+    case = db.query(Case).filter(
+        Case.case_id == case_id,
+        Case.merchant_id == current_merchant.merchant_id,
+    ).first()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found.")
         
