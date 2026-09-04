@@ -14,6 +14,7 @@ memory usage stays bounded across a long-running process; this is an
 observability aid, not a durable metrics store.
 """
 
+import functools
 import threading
 import time
 from collections import deque
@@ -72,11 +73,10 @@ def track_latency(category: str):
 def track_latency_decorator(category: str):
     """Function decorator form of track_latency, for wrapping whole callables (e.g. Celery tasks)."""
     def decorator(func):
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
             with track_latency(category):
                 return func(*args, **kwargs)
-        wrapper.__name__ = getattr(func, "__name__", "wrapped")
-        wrapper.__doc__ = func.__doc__
         return wrapper
     return decorator
 

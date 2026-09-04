@@ -145,12 +145,24 @@ def test_runtime_metrics_decorator_preserves_return_value_and_name():
 
     reset_runtime_metrics()
 
-    @track_latency_decorator("inference")
     def compute(x):
+        """Doubles x."""
         return x * 2
 
-    assert compute(21) == 42
-    assert compute.__name__ == "compute"
+    decorated = track_latency_decorator("inference")(compute)
+
+    assert decorated(21) == 42
+    # D-05: the decorator must preserve the wrapped function's real identity
+    # metadata — not just __name__, but __module__ (the actual regression:
+    # Celery derives a task's registered name from __module__ + __name__,
+    # so a wrapper whose __module__ silently defaulted to this
+    # runtime_metrics module — rather than the wrapped function's own
+    # module — produced a misleading task identity in worker logs/registry).
+    assert decorated.__name__ == "compute"
+    assert decorated.__module__ == compute.__module__
+    assert decorated.__doc__ == compute.__doc__
+    assert decorated.__qualname__ == compute.__qualname__
+    assert decorated.__wrapped__ is compute
     reset_runtime_metrics()
 
 
@@ -161,6 +173,55 @@ def test_h22_and_l04_metrics_stay_separate_modules():
     assert queue_metrics is not runtime_metrics
     assert not hasattr(queue_metrics, "record_latency")
     assert not hasattr(runtime_metrics, "compute_queue_age_metrics")
+
+
+def test_track_latency_decorated_celery_tasks_register_under_their_own_module():
+    """
+    D-05: with @track_latency_decorator("queue_duration") applied beneath
+    @celery_app.task(...), the affected tasks' registered Celery identity
+    must be their own defining module (app.worker.tasks.*), never the
+    runtime_metrics module the decorator itself lives in. Uses the same
+    fresh-subprocess technique as the D-03 registration tests — a check
+    inside pytest's own process would not be authoritative, since Celery
+    derives a task's registered name from the wrapped function's
+    __module__/__name__ at decoration time (i.e. at import time), and a
+    correct answer here does not depend on which process asks.
+    """
+    import json
+    import subprocess
+    import sys
+
+    script = (
+        "from app.worker.celery_app import celery_app\n"
+        "celery_app.loader.import_default_modules()\n"
+        "import json\n"
+        "print(json.dumps(sorted(celery_app.tasks.keys())))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd="/home/user/Resolve_AI/backend",
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, f"subprocess failed: {result.stderr}"
+    registered = json.loads(result.stdout.strip().splitlines()[-1])
+
+    expected = [
+        "app.worker.tasks.enrich_dispute_task",
+        "app.worker.tasks.scan_evidence_task",
+        "app.worker.tasks.process_evidence_document_task",
+    ]
+    misleading = [
+        "app.services.observability.runtime_metrics.enrich_dispute_task",
+        "app.services.observability.runtime_metrics.scan_evidence_task",
+        "app.services.observability.runtime_metrics.process_evidence_document_task",
+    ]
+    for name in expected:
+        assert name in registered, f"{name} missing from fresh worker-equivalent registry: {registered}"
+    for name in misleading:
+        assert name not in registered, f"misleading task identity still present: {name}"
+    # No duplicate registration introduced by the metadata fix.
+    for name in expected:
+        assert registered.count(name) == 1
 
 
 # ---------------------------------------------------------------------------
