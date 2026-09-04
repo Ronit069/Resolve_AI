@@ -31,7 +31,8 @@ async def dev_synthetic_dispute(
         event_id=payload.external_event_id,
         event_type=payload.event_type,
         event_time=payload.event_time,
-        dispute_data=payload.model_dump()
+        dispute_data=payload.model_dump(),
+        account_id=payload.account_id
     )
     
     return {"status": "success", "message": "Synthetic webhook processed", "case_id": case_id}

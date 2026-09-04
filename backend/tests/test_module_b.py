@@ -713,6 +713,12 @@ def test_module_a_ingestion_still_works(mocker):
     """Verify Module A webhook ingestion works after Module B changes."""
     mock_delay = mocker.patch("app.services.ingestion.enrich_dispute_task.delay")
 
+    # D-04: the webhook's account_id must resolve to a known, active Merchant.
+    db = TestingSessionLocal()
+    db.add(Merchant(external_merchant_id="acc_123", name="Test Merchant ACC123", is_active=True))
+    db.commit()
+    db.close()
+
     payload = {
         "entity": "event",
         "account_id": "acc_123",
@@ -774,9 +780,16 @@ def test_module_a_dev_endpoint_still_works(mocker):
 
     settings.ENABLE_DEV_ENDPOINTS = True
 
+    # D-04: the dev endpoint's account_id must resolve to a known, active Merchant.
+    db = TestingSessionLocal()
+    db.add(Merchant(external_merchant_id="acc_123", name="Test Merchant ACC123", is_active=True))
+    db.commit()
+    db.close()
+
     payload = {
         "external_event_id": "dev_regr_b",
         "event_type": "dispute.created",
+        "account_id": "acc_123",
         "external_dispute_id": "disp_dev_regr",
         "payment_id": "pay_dev_regr",
         "amount_minor": 500,

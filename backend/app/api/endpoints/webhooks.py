@@ -55,7 +55,8 @@ async def razorpay_webhook(
         event_id=event_id,
         event_type=payload.event,
         event_time=event_time,
-        dispute_data=dispute_data
+        dispute_data=dispute_data,
+        account_id=payload.account_id
     )
     
     return {"status": "success", "message": "Webhook processed", "case_id": case_id}

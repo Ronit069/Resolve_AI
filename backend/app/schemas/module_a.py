@@ -28,6 +28,7 @@ class RazorpayWebhookEvent(BaseModel):
 class SyntheticDisputePayload(BaseModel):
     external_event_id: str
     event_type: str
+    account_id: str
     external_dispute_id: str
     payment_id: str
     amount_minor: int

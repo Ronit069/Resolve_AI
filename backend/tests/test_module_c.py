@@ -422,7 +422,12 @@ def test_end_to_end_ingestion_to_evidence(mock_scan, mock_storage, setup_db: Ses
     def generate_signature(payload: str) -> str:
         secret = settings.RAZORPAY_WEBHOOK_SECRET
         return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
-    
+
+    # D-04: the webhook's account_id must resolve to a known, active Merchant.
+    if not setup_db.query(Merchant).filter_by(external_merchant_id="acc_123").first():
+        setup_db.add(Merchant(external_merchant_id="acc_123", name="Test Merchant ACC123", is_active=True))
+        setup_db.commit()
+
     # 1. Ingestion via Webhook API
     now = int(time.time())
     payload = {

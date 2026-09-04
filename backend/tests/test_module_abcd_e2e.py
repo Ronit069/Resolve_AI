@@ -72,6 +72,12 @@ def test_full_e2e_pipeline_a_to_d(mock_process_d, mock_scan_c, mock_storage):
     from app.services.scanner import run_evidence_scan
     import starlette.datastructures
     
+    # D-04: the webhook's account_id must resolve to a known, active Merchant.
+    with TestingSessionLocal() as _db:
+        if not _db.query(Merchant).filter_by(external_merchant_id="acc_123").first():
+            _db.add(Merchant(external_merchant_id="acc_123", name="Test Merchant ACC123", is_active=True))
+            _db.commit()
+
     # 1. Ingestion (Module A)
     now = int(time.time())
     disp_id = f"disp_e2e_{uuid.uuid4()}"

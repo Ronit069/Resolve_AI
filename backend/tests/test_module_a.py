@@ -12,7 +12,7 @@ from app.main import app
 from app.core.database import Base, get_db
 from app.core.config import settings
 from app.models.module_a import WebhookEvent, Dispute, DisputeEvent
-from app.models.shared import Case, ProcessingState
+from app.models.shared import Case, ProcessingState, Merchant
 
 # Use SQLite for tests
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
@@ -40,6 +40,14 @@ client = TestClient(app)
 def setup_db():
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    # D-04: every webhook/dev payload in this file identifies itself via
+    # account_id="acc_123" — seed the matching, active Merchant so ingestion's
+    # fail-closed merchant resolution can succeed exactly as it would in
+    # production when the account_id is known and active.
+    db = TestingSessionLocal()
+    db.add(Merchant(external_merchant_id="acc_123", name="Test Merchant ACC123", is_active=True))
+    db.commit()
+    db.close()
     yield
     
 def generate_signature(payload_str: str) -> str:
@@ -240,6 +248,7 @@ def test_dev_endpoint_disabled(mocker):
     payload = {
         "external_event_id": "dev_1",
         "event_type": "dispute.created",
+        "account_id": "acc_123",
         "external_dispute_id": "disp_dev",
         "payment_id": "pay_dev",
         "amount_minor": 500,

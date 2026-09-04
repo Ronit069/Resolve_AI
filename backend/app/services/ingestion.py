@@ -19,7 +19,8 @@ def process_dispute_event(
     event_id: str,
     event_type: str,
     event_time: datetime,
-    dispute_data: dict
+    dispute_data: dict,
+    account_id: str
 ) -> str:
     """
     Core logic to ingest a dispute event from Razorpay or Synthetic endpoints.
@@ -76,12 +77,17 @@ def process_dispute_event(
         db.rollback()
         raise HTTPException(status_code=400, detail="Invalid dispute payload structure")
 
-    # For MVP, assume a default merchant exists (or create one for testing)
-    merchant = db.query(Merchant).first()
+    # Resolve the merchant strictly from the event's own account_id. Fail
+    # closed: never fall back to an arbitrary/default/first merchant, and
+    # never attribute an event to an inactive merchant.
+    merchant = db.query(Merchant).filter(
+        Merchant.external_merchant_id == account_id,
+        Merchant.is_active == True
+    ).first()
     if not merchant:
-        merchant = Merchant(external_merchant_id="default", name="Default Merchant")
-        db.add(merchant)
-        db.flush()
+        logger.error(f"Unknown or inactive merchant for account_id={account_id!r} in event {event_id}")
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Unknown or inactive merchant account")
 
     # 3. Resolve Case & Dispute
     existing_dispute = db.query(Dispute).filter(Dispute.external_dispute_id == ext_dispute_id).first()

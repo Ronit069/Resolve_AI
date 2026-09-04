@@ -149,6 +149,7 @@ def _seed_case_with_dispute(db, external_dispute_id, event_id, amount_minor, rea
         db=db, source="synthetic", raw_payload=raw_payload,
         event_id=event_id, event_type="dispute.created",
         event_time=now, dispute_data=dispute_data,
+        account_id=DEMO_MERCHANT_EXTERNAL_ID,
     )
     if case_id_str is None:
         # Duplicate event — the Dispute row must already exist; re-read it.
