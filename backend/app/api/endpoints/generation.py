@@ -140,6 +140,43 @@ def generate_draft(
                 rank=row.rank,
                 metadata=combined_meta,
             ))
+    else:
+        # [BLUEPRINT REQUIREMENT] Inline synchronous retrieval for MVP
+        try:
+            import openai
+            from app.core.config import settings
+            from app.services.rag.retrieval import KnowledgeRetrievalService
+            
+            client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+            # Use the dispute reason code or summary for the search query
+            query_text = dict(snapshot.features_json).get("dispute_reason_code", "chargeback")
+            
+            response = client.embeddings.create(input=[query_text], model="text-embedding-3-small")
+            query_embedding = response.data[0].embedding
+            
+            # Temporarily lower threshold so short reason codes return chunks
+            original_threshold = settings.RETRIEVAL_SIMILARITY_THRESHOLD
+            settings.RETRIEVAL_SIMILARITY_THRESHOLD = 0.0
+            
+            retrieval_service = KnowledgeRetrievalService(db)
+            retrieved_chunks = retrieval_service.retrieve_knowledge(
+                case_id=case_uuid,
+                prediction_id=prediction.id,
+                query_embedding=query_embedding,
+                query_text_redacted=query_text,
+                merchant_id=case.merchant_id
+            )
+            
+            settings.RETRIEVAL_SIMILARITY_THRESHOLD = original_threshold
+            
+            # Retrieve the newly created run ID if chunks were found
+            if retrieved_chunks:
+                retrieval_run = db.query(RagRetrievalRun).filter(RagRetrievalRun.case_id == case_uuid).order_by(RagRetrievalRun.created_at.desc()).first()
+                if retrieval_run:
+                    retrieval_run_id = retrieval_run.id
+        except Exception as e:
+            print(f"Inline Retrieval Failed: {e}")
+            retrieved_chunks = []
 
     # 5. Assemble fact packet
     assembler = ContextAssembler()
