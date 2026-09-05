@@ -40,17 +40,33 @@ export function AsyncState<T>({
   children,
 }: AsyncStateProps<T>) {
   if (loading) {
-    return <div role="status">{loadingMessage}</div>;
+    return (
+      <div role="status" className="state-banner">
+        <span className="btn-spinner" aria-hidden="true" />
+        {loadingMessage}
+      </div>
+    );
   }
-  
+
   const is404Error = !!error && typeof ApiError !== "undefined" && error instanceof ApiError && error.status === 404;
-  
+
   if (error && !(treat404AsEmpty && is404Error)) {
-    return <div role="alert">{describeError(error)}</div>;
+    return (
+      <div role="alert" className="state-banner">
+        {describeError(error)}
+      </div>
+    );
   }
-  
+
   if (data == null || (isEmpty && isEmpty(data)) || (treat404AsEmpty && is404Error)) {
-    return <div role="status">{emptyMessage}</div>;
+    return (
+      <div role="status" className="empty-state">
+        <div className="empty-state-icon" aria-hidden="true">
+          ◇
+        </div>
+        {emptyMessage}
+      </div>
+    );
   }
   return <>{children(data)}</>;
 }

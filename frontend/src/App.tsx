@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, Link } from "react-router-dom";
+import { Navigate, Route, Routes, NavLink } from "react-router-dom";
 import { IdentityProvider, useIdentity } from "./state/IdentityContext";
 import { Login } from "./pages/Login";
 import { RiskCommandCenter } from "./pages/RiskCommandCenter";
@@ -7,6 +7,7 @@ import { CaseWorkspace } from "./pages/CaseWorkspace";
 import { ResponseReview } from "./pages/ResponseReview";
 import { ModelMetrics } from "./pages/ModelMetrics";
 import { AuditActivity } from "./pages/AuditActivity";
+import "./index.css";
 
 function RequireIdentity({ children }: { children: JSX.Element }) {
   const { userId } = useIdentity();
@@ -16,12 +17,31 @@ function RequireIdentity({ children }: { children: JSX.Element }) {
   return children;
 }
 
+function navLinkClass({ isActive }: { isActive: boolean }) {
+  return isActive ? "nav-link active" : "nav-link";
+}
+
 function Layout({ children }: { children: JSX.Element }) {
   return (
-    <div>
-      <nav>
-        <Link to="/">Risk Command Center</Link> | <Link to="/queue">Dispute Queue</Link> |{" "}
-        <Link to="/metrics">Model Metrics</Link> | <Link to="/login">Switch identity</Link>
+    <div className="app-shell">
+      <nav className="navbar">
+        <div className="navbar-inner">
+          <span className="navbar-brand">ResolveAI</span>
+          <div className="navbar-links">
+            <NavLink to="/" end className={navLinkClass}>
+              Risk Command Center
+            </NavLink>
+            <NavLink to="/queue" className={navLinkClass}>
+              Dispute Queue
+            </NavLink>
+            <NavLink to="/metrics" className={navLinkClass}>
+              Model Metrics
+            </NavLink>
+            <NavLink to="/login" className="nav-link nav-link-muted">
+              Switch identity
+            </NavLink>
+          </div>
+        </div>
       </nav>
       {children}
     </div>

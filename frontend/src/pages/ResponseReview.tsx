@@ -97,79 +97,145 @@ export function ResponseReview() {
   };
 
   return (
-    <div>
-      <h1>Response Review</h1>
-      <AsyncState 
-        loading={loading} 
-        error={error} 
-        data={draft} 
-        emptyMessage={
-          <div>
-            <p>No draft generated for this case yet.</p>
-            <RoleGate allow={["APPROVER"]}>
-              <button onClick={handleGenerate} disabled={generating}>
-                {generating ? "Generating..." : "Generate AI Draft"}
-              </button>
-            </RoleGate>
-          </div>
-        }
-        treat404AsEmpty={true}
-      >
-        {(d) => (
-          <section>
-            <h2>Draft Summary</h2>
-            <p>Guardrail status: {d.guardrail_status}</p>
-            <p>{d.summary}</p>
-          </section>
-        )}
-      </AsyncState>
+    <div className="page">
+      <div className="page-header">
+        <h1 className="page-title">Response Review</h1>
+      </div>
 
-      {outcome?.kind === "awaiting-second-approval" && (
-        <div role="status">
-          Submitted — awaiting a second, distinct approver. This is not yet final.
-        </div>
-      )}
-      {outcome?.kind === "finalized" && <div role="status">Review action finalized.</div>}
-      {outcome?.kind === "escalated-cancelled" && (
-        <div role="status">Escalated — the pending decision was cancelled, not approved.</div>
-      )}
-      {outcome?.kind === "error" && <div role="alert">{outcome.detail}</div>}
-
-      <RoleGate
-        allow={["APPROVER"]}
-        fallback={<p role="note">Your current role cannot submit review actions.</p>}
-      >
-        <form onSubmit={handleSubmit}>
-          <label htmlFor="action-select">Review action</label>
-          <select
-            id="action-select"
-            value={action}
-            onChange={(e) => setAction(e.target.value as ReviewActionEnum)}
+      <div className="grid-2col">
+        <div className="stack">
+          <AsyncState
+            loading={loading}
+            error={error}
+            data={draft}
+            emptyMessage={
+              <div className="card">
+                <div className="empty-state">
+                  <div className="empty-state-icon" aria-hidden="true">
+                    ◇
+                  </div>
+                  <p>No draft generated for this case yet.</p>
+                  <RoleGate allow={["APPROVER"]}>
+                    <button onClick={handleGenerate} disabled={generating} className="btn btn-primary btn-block">
+                      {generating ? (
+                        <>
+                          <span className="btn-spinner" aria-hidden="true" />
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <span aria-hidden="true">✦ </span>
+                          Generate AI Draft
+                        </>
+                      )}
+                    </button>
+                  </RoleGate>
+                </div>
+              </div>
+            }
+            treat404AsEmpty={true}
           >
-            {ACTIONS.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
+            {(d) => (
+              <section className="card">
+                <div className="page-header" style={{ marginBottom: 12 }}>
+                  <h2 style={{ marginBottom: 0 }}>AI Draft</h2>
+                  <span
+                    className={
+                      d.guardrail_status === "PASS"
+                        ? "badge badge-success badge-glow-success badge-lg"
+                        : "badge badge-danger badge-glow-danger badge-lg"
+                    }
+                  >
+                    {d.guardrail_status}
+                  </span>
+                </div>
+                <div className="draft-doc">{d.summary}</div>
+              </section>
+            )}
+          </AsyncState>
+        </div>
 
-          <label htmlFor="override-reason-input">
-            Override reason code (required by the server for some actions)
-          </label>
-          <input
-            id="override-reason-input"
-            value={overrideReasonCode}
-            onChange={(e) => setOverrideReasonCode(e.target.value)}
-          />
+        <div className="stack">
+          {outcome?.kind === "awaiting-second-approval" && (
+            <div role="status" className="state-banner">
+              Submitted — awaiting a second, distinct approver. This is not yet final.
+            </div>
+          )}
+          {outcome?.kind === "finalized" && (
+            <div role="status" className="state-banner state-success">
+              Review action finalized.
+            </div>
+          )}
+          {outcome?.kind === "escalated-cancelled" && (
+            <div role="status" className="state-banner">
+              Escalated — the pending decision was cancelled, not approved.
+            </div>
+          )}
+          {outcome?.kind === "error" && (
+            <div role="alert" className="state-banner">
+              {outcome.detail}
+            </div>
+          )}
 
-          <label htmlFor="notes-input">Notes (required alongside an override reason)</label>
-          <textarea id="notes-input" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <RoleGate
+            allow={["APPROVER"]}
+            fallback={
+              <p role="note" className="state-banner" style={{ display: "block" }}>
+                Your current role cannot submit review actions.
+              </p>
+            }
+          >
+            <form onSubmit={handleSubmit} className="card">
+              <h2>Review Action</h2>
+              <div className="form-group">
+                <label htmlFor="action-select" className="form-label">
+                  Review action
+                </label>
+                <select
+                  id="action-select"
+                  className="form-select"
+                  value={action}
+                  onChange={(e) => setAction(e.target.value as ReviewActionEnum)}
+                >
+                  {ACTIONS.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          <button type="submit" disabled={submitting}>
-            Submit
-          </button>
-        </form>
-      </RoleGate>
+              <div className="form-group">
+                <label htmlFor="override-reason-input" className="form-label">
+                  Override reason code (required by the server for some actions)
+                </label>
+                <input
+                  id="override-reason-input"
+                  className="form-input"
+                  value={overrideReasonCode}
+                  onChange={(e) => setOverrideReasonCode(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="notes-input" className="form-label">
+                  Notes (required alongside an override reason)
+                </label>
+                <textarea
+                  id="notes-input"
+                  className="form-textarea"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
+              </div>
+
+              <button type="submit" disabled={submitting} className="btn btn-primary btn-block">
+                {submitting ? <span className="btn-spinner" aria-hidden="true" /> : null} Submit
+              </button>
+            </form>
+          </RoleGate>
+        </div>
+      </div>
     </div>
   );
 }

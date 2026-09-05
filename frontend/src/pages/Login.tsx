@@ -35,36 +35,55 @@ export function Login() {
   };
 
   return (
-    <div>
-      <h1>ResolveAI — Development Sign-in</h1>
-      <p role="note">
-        <strong>Development identity selector — not a secure login.</strong> This does not
-        authenticate you. It only sets the identifier sent as the <code>X-User-Id</code>{" "}
-        header on API requests, and a role label used only to show/hide UI controls. The
-        server independently verifies your real role and access on every request.
-      </p>
-      <form onSubmit={handleSubmit}>
-        <label htmlFor="user-id-input">User ID (UUID)</label>
-        <input
-          id="user-id-input"
-          value={userIdInput}
-          onChange={(e) => setUserIdInput(e.target.value)}
-          placeholder="00000000-0000-0000-0000-000000000000"
-        />
-        <label htmlFor="role-select">Role (display only — not sent to the server)</label>
-        <select
-          id="role-select"
-          value={roleInput}
-          onChange={(e) => setRoleInput(e.target.value as AppUserRole)}
-        >
-          {ROLE_OPTIONS.map((role) => (
-            <option key={role} value={role}>
-              {role}
-            </option>
-          ))}
-        </select>
-        <button type="submit">Continue</button>
-      </form>
+    <div className="page" style={{ maxWidth: 480, marginTop: "10vh" }}>
+      <div className="card">
+        <h1 className="page-title" style={{ fontSize: 22 }}>
+          ResolveAI — Development Sign-in
+        </h1>
+        <p role="note" className="state-banner" style={{ display: "block" }}>
+          <strong style={{ color: "var(--text)" }}>
+            Development identity selector — not a secure login.
+          </strong>{" "}
+          This does not authenticate you. It only sets the identifier sent as the{" "}
+          <code>X-User-Id</code> header on API requests, and a role label used only to
+          show/hide UI controls. The server independently verifies your real role and
+          access on every request.
+        </p>
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label htmlFor="user-id-input" className="form-label">
+              User ID (UUID)
+            </label>
+            <input
+              id="user-id-input"
+              className="form-input mono"
+              value={userIdInput}
+              onChange={(e) => setUserIdInput(e.target.value)}
+              placeholder="00000000-0000-0000-0000-000000000000"
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="role-select" className="form-label">
+              Role (display only — not sent to the server)
+            </label>
+            <select
+              id="role-select"
+              className="form-select"
+              value={roleInput}
+              onChange={(e) => setRoleInput(e.target.value as AppUserRole)}
+            >
+              {ROLE_OPTIONS.map((role) => (
+                <option key={role} value={role}>
+                  {role}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button type="submit" className="btn btn-primary btn-block">
+            Continue
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

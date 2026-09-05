@@ -4,6 +4,10 @@ import { getCaseAuditLog } from "../api/client";
 import type { AuditFeedResponse } from "../api/types";
 import { AsyncState } from "../components/AsyncState";
 
+function eventTypeBadgeClass(eventType: string): string {
+  return eventType === "REVIEW_ACTION" ? "badge badge-indigo" : "badge badge-gray";
+}
+
 /** I-07 — Audit / Activity. Read-only; renders the merged AuditLog + ReviewAction feed. */
 export function AuditActivity() {
   const { caseId } = useParams<{ caseId: string }>();
@@ -25,8 +29,10 @@ export function AuditActivity() {
   }, [caseId]);
 
   return (
-    <div>
-      <h1>Audit / Activity</h1>
+    <div className="page">
+      <div className="page-header">
+        <h1 className="page-title">Audit / Activity</h1>
+      </div>
       <AsyncState
         loading={loading}
         error={error}
@@ -35,16 +41,19 @@ export function AuditActivity() {
         emptyMessage="No activity recorded for this case."
       >
         {(feed) => (
-          <ul>
-            {feed.items.map((event) => (
-              <li key={`${event.event_type}:${event.event_id}`}>
-                <strong>[{event.event_type}]</strong> {event.action}
-                {event.details ? ` — ${event.details}` : ""}
-                {" — "}
-                {new Date(event.created_at).toLocaleString()}
-              </li>
-            ))}
-          </ul>
+          <div className="card">
+            <ul>
+              {feed.items.map((event) => (
+                <li key={`${event.event_type}:${event.event_id}`} className="card-row">
+                  <span className={eventTypeBadgeClass(event.event_type)}>[{event.event_type}]</span>{" "}
+                  {event.action}
+                  {event.details ? ` — ${event.details}` : ""}
+                  {" — "}
+                  <span className="text-muted">{new Date(event.created_at).toLocaleString()}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </AsyncState>
     </div>
