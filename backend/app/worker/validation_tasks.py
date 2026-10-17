@@ -117,8 +117,17 @@ def execute_evidence_validation(self, validation_run_id: str):
             
         case.processing_state = ProcessingState.FEATURE_READY
         run.status = EValidationRunStatus.COMPLETED
-        
+
         db.commit()
+
+        # Celery dispatch ONLY after commit, matching ingestion.py's own
+        # convention -- a dispatch failure never rolls back the (already
+        # committed) feature snapshot; the case is safely retryable later.
+        try:
+            from app.worker.risk_scoring_tasks import score_risk_task
+            score_risk_task.delay(str(case.case_id))
+        except Exception as dispatch_exc:
+            logger.error(f"Failed to dispatch score_risk_task for case {case.case_id}: {dispatch_exc}")
     except SQLAlchemyError as e:
         db.rollback()
         with SessionLocal() as fail_db:

@@ -18,6 +18,7 @@ class ProcessingState(str, enum.Enum):
     E_VALIDATING = "E_VALIDATING"
     EVIDENCE_VALIDATED = "EVIDENCE_VALIDATED"
     FEATURE_READY = "FEATURE_READY"
+    RISK_SCORED = "RISK_SCORED"
 
 class Merchant(Base):
     __tablename__ = "merchants"

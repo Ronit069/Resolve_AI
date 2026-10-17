@@ -4,7 +4,7 @@ from app.models.shared import ProcessingState
 def test_processing_state_enum():
     assert ProcessingState.RECEIVED.value == "RECEIVED"
     assert ProcessingState.EVIDENCE_READY.value == "EVIDENCE_READY"
-    assert len(ProcessingState) == 11
+    assert len(ProcessingState) == 12
 
 def test_schemas():
     from app.schemas.shared import CaseBase
