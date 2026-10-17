@@ -22,6 +22,7 @@ app/ reads them" convention as evaluation_artifact.py.
 
 import hashlib
 import json
+import logging
 import os
 import pickle
 from dataclasses import dataclass
@@ -32,6 +33,8 @@ import catboost
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class ChampionArtifactsUnavailable(Exception):
@@ -182,6 +185,66 @@ def load_candidate_artifacts_from_disk() -> ChampionArtifacts:
     return artifacts
 
 
+def _object_storage_key(model_version_id: UUID, filename: str) -> str:
+    return f"models/{model_version_id}/{filename}"
+
+
+def _download_cached(key: str) -> str:
+    """
+    Downloads an object-storage key to a local cache file (under
+    MODEL_EVALUATION_ARTIFACT_DIR/_object_storage_cache/<key>) and
+    returns its path, skipping the download if already cached. Safe to
+    cache indefinitely: each ModelVersion's artifacts are written to
+    this key exactly once, at promotion time, and never overwritten.
+    """
+    from app.core.storage import storage_client
+
+    cache_path = os.path.join(settings.MODEL_EVALUATION_ARTIFACT_DIR, "_object_storage_cache", key)
+    if os.path.isfile(cache_path):
+        return cache_path
+
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    data = storage_client.download_file(key)
+    tmp_path = f"{cache_path}.tmp.{os.getpid()}"
+    with open(tmp_path, "wb") as f:
+        f.write(data)
+    os.replace(tmp_path, cache_path)
+    return cache_path
+
+
+def upload_champion_artifacts_to_object_storage(candidate: ChampionArtifacts, model_version_id: UUID) -> None:
+    """
+    Best-effort upload of a newly-promoted champion's model.cbm and
+    calibrator.pkl to object storage, at the same deterministic key
+    load_champion_artifacts() falls back to when its local artifact_uri
+    path doesn't exist on the current machine -- this is what lets a
+    model promoted on the training machine actually get loaded by a
+    separate production machine, instead of only ever working on
+    whichever disk the offline pipeline happened to write to.
+
+    Never raises: a storage hiccup here must not block promotion itself,
+    since this machine can still serve the just-promoted model from its
+    own local disk either way.
+    """
+    from app.core.storage import storage_client
+
+    try:
+        with open(candidate.model_cbm_path, "rb") as f:
+            storage_client.upload_file(
+                f, _object_storage_key(model_version_id, "model.cbm"), content_type="application/octet-stream"
+            )
+        with open(candidate.calibrator_path, "rb") as f:
+            storage_client.upload_file(
+                f, _object_storage_key(model_version_id, "calibrator.pkl"), content_type="application/octet-stream"
+            )
+    except Exception as exc:
+        logger.warning(
+            f"Failed to upload champion artifacts for ModelVersion {model_version_id} to object "
+            f"storage; this machine will still serve it from local disk, but a different machine "
+            f"won't be able to load it until this is retried: {exc}"
+        )
+
+
 def load_champion_artifacts(db: Session) -> ChampionArtifacts:
     """
     Loads the model/calibrator/policy that the registry currently
@@ -209,11 +272,26 @@ def load_champion_artifacts(db: Session) -> ChampionArtifacts:
 
     model_path = champion_version.artifact_uri
     calibrator_path = champion_version.calibrator_uri
-    if not (model_path and os.path.isfile(model_path) and calibrator_path and os.path.isfile(calibrator_path)):
+    if not (model_path and calibrator_path):
         raise ChampionArtifactsUnavailable(
-            f"Champion ModelVersion {champion_version.id} references artifacts no longer "
-            f"present on disk (model={model_path}, calibrator={calibrator_path})."
+            f"Champion ModelVersion {champion_version.id} has no artifact_uri/calibrator_uri recorded."
         )
+
+    if not (os.path.isfile(model_path) and os.path.isfile(calibrator_path)):
+        # Not on this machine's local disk -- fall back to the object-storage
+        # location promote_candidate_from_disk() best-effort uploads to at
+        # promotion time, so a model promoted elsewhere (e.g. the training
+        # machine) can still be loaded here (e.g. a production machine).
+        try:
+            model_path = _download_cached(_object_storage_key(champion_version.id, "model.cbm"))
+            calibrator_path = _download_cached(_object_storage_key(champion_version.id, "calibrator.pkl"))
+        except Exception as exc:
+            raise ChampionArtifactsUnavailable(
+                f"Champion ModelVersion {champion_version.id} references artifacts not present on "
+                f"local disk (model={champion_version.artifact_uri}, calibrator="
+                f"{champion_version.calibrator_uri}), and fetching them from object storage also "
+                f"failed: {exc}"
+            ) from exc
 
     policy = {
         "t_accept": policy_row.accept_threshold,

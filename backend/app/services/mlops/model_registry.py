@@ -167,7 +167,10 @@ def promote_candidate_from_disk(db: Session) -> PromotionDecision:
     Raises ChampionArtifactsUnavailable if there is no candidate on
     disk at all (nothing to evaluate).
     """
-    from app.services.mlops.champion_loader import load_candidate_artifacts_from_disk
+    from app.services.mlops.champion_loader import (
+        load_candidate_artifacts_from_disk,
+        upload_champion_artifacts_to_object_storage,
+    )
 
     candidate = load_candidate_artifacts_from_disk()
 
@@ -209,6 +212,7 @@ def promote_candidate_from_disk(db: Session) -> PromotionDecision:
         return PromotionDecision(False, reason, model_version, None)
 
     champion = mark_champion(db, model_version.id)
+    upload_champion_artifacts_to_object_storage(candidate, champion.id)
 
     if current_champion is not None and current_champion.id != champion.id:
         db.query(ModelDecisionPolicy).filter(
