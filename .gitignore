@@ -33,6 +33,7 @@ Thumbs.db
 # Local/generated ML artifacts
 backend/artifacts/
 backend/catboost_info/
+backend/mlruns/
 
 # Local databases
 backend/*.db

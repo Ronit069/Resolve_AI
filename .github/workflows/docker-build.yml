@@ -1,0 +1,82 @@
+name: Docker Build
+
+# Issue #13: docker-compose.yaml / Dockerfile.api / Dockerfile.worker /
+# frontend/Dockerfile had never been exercised anywhere in this repo's
+# history -- every test run (ci.yml) uses locally-installed Postgres/
+# Redis/moto, never the containers themselves. This workflow actually
+# builds and runs the full stack end to end on every push/PR, so a
+# regression here (a stale dependency, a missing env var, a broken
+# build context) is caught automatically instead of discovered at
+# actual deploy time.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  docker-compose-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create backend/.env from .env.example
+        # .env.example's Postgres/MinIO values are not placeholders here --
+        # they must match (and, after issue #13's fix, do match)
+        # docker-compose.yaml's own hardcoded postgres/minio credentials.
+        run: cp backend/.env.example backend/.env
+
+      - name: Build all images
+        run: docker compose build
+
+      - name: Start Postgres/Redis/MinIO/MLflow
+        run: docker compose up -d postgres redis minio mlflow
+
+      - name: Wait for Postgres and enable pgvector
+        run: |
+          for i in $(seq 1 30); do
+            docker compose exec -T postgres pg_isready -U resolve_user -d resolve_db && break
+            sleep 2
+          done
+          docker compose exec -T postgres psql -U resolve_user -d resolve_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      - name: Run Alembic migrations inside the api image
+        run: docker compose run --rm api python -m alembic upgrade head
+
+      - name: Start api, worker, and web
+        run: docker compose up -d api worker web
+
+      - name: Wait for the API to actually serve traffic
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/docs > /dev/null; then
+              echo "API is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API never became healthy"
+          docker compose logs api
+          exit 1
+
+      - name: Confirm the worker container started and isn't crash-looping
+        run: |
+          sleep 10
+          docker compose ps worker
+          running=$(docker inspect -f '{{.State.Running}}' "$(docker compose ps -q worker)")
+          echo "worker running: $running"
+          if [ "$running" != "true" ]; then
+            docker compose logs worker
+            exit 1
+          fi
+
+      - name: Confirm the frontend is served
+        run: curl -sf http://localhost:5173/ > /dev/null
+
+      - name: Dump all logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

@@ -37,7 +37,12 @@ def test_compose_file_is_valid_yaml_with_expected_services():
         assert expected in services, f"missing service: {expected}"
 
     # Existing infra service definitions are preserved, not redesigned.
-    assert services["postgres"]["image"] == "pgvector/pgvector:pg15"
+    # postgres bumped pg15 -> pg16 (issue #13): this compose file is now
+    # the only place pgvector/pgvector:pg15 was ever used -- ci.yml's own
+    # postgres service has run pg16 since CI was added, so this service
+    # was never actually running the Postgres version the Alembic
+    # migrations and test suite are validated against.
+    assert services["postgres"]["image"] == "pgvector/pgvector:pg16"
     assert services["redis"]["image"] == "redis:7-alpine"
     assert services["minio"]["image"] == "minio/minio:latest"
 

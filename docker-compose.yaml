@@ -1,8 +1,10 @@
-version: '3.8'
-
 services:
   postgres:
-    image: pgvector/pgvector:pg15
+    # Matches .github/workflows/ci.yml's postgres service exactly --
+    # previously pg15 here vs pg16 in CI, so this compose setup was never
+    # actually running against the same Postgres version the test suite
+    # (and Alembic migrations) are validated against.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: resolve_user
       POSTGRES_PASSWORD: resolve_password
@@ -44,9 +46,16 @@ services:
   # volume, not a managed/hosted service.
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
+    # Issue #15: mlflow>=3.0 put the bare-filesystem backend store into
+    # maintenance mode (it now raises instead of working) -- a sqlite:///
+    # URI inside the same mounted volume is the same "local/self-hosted
+    # only" decision (no server-managed external DB, no production
+    # credential) and isn't deprecated. --default-artifact-root stays a
+    # plain path: only the backend *store* (run metadata) was deprecated,
+    # never the artifact store.
     command: >
       mlflow server --host 0.0.0.0 --port 5000
-      --backend-store-uri /mlruns --default-artifact-root /mlruns
+      --backend-store-uri sqlite:////mlruns/mlflow.db --default-artifact-root /mlruns
     ports:
       - "5001:5000"
     volumes:
