@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     # Features
     ENABLE_DEV_ENDPOINTS: bool = Field(default=False, description="Enable development endpoints")
 
+    # Module L: structured logging + error tracking (issue #16)
+    LOG_LEVEL: str = Field(default="INFO", description="Root logger level for the JSON logging configured in app/core/logging_config.py")
+    SENTRY_DSN: Optional[str] = Field(default=None, description="Sentry error-tracking DSN. Unset (the default) means no Sentry SDK traffic at all -- see app/core/error_tracking.py")
+    SENTRY_TRACES_SAMPLE_RATE: float = Field(default=0.0, description="Sentry performance-tracing sample rate, 0.0-1.0. 0 disables tracing; error capture is unaffected either way")
+
     # Module D: Document Intelligence Limits
     MAX_PDF_PAGES: int = Field(default=50, description="Maximum allowed pages in a PDF document")
     MAX_IMAGE_WIDTH: int = Field(default=8000, description="Maximum image width in pixels")

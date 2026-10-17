@@ -99,6 +99,12 @@ To run a training script against the compose `mlflow` service:
 MLFLOW_TRACKING_URI=http://localhost:5001 python backend/train_lightgbm_comparator.py
 ```
 
+## Logging and error tracking
+
+Every log line the API and worker emit is structured JSON (`app/core/logging_config.py`) carrying a `correlation_id`: the API's HTTP middleware sets it from an inbound `X-Request-ID` header (generating one if absent, always echoing it back), and the worker sets it per Celery task from that task's own business identifier (`case_id`/`document_id`/`validation_run_id`/`outbox_id` — whichever that task was actually called with). A single failure in the ingestion → enrichment → evidence → validation → scoring chain can be traced by that one ID across every service's logs.
+
+Error tracking (`app/core/error_tracking.py`) is Sentry, entirely optional: unset `SENTRY_DSN` (the default everywhere, including CI) means zero Sentry SDK traffic. Set it to turn it on — no other code change needed.
+
 Then browse runs at http://localhost:5001.
 
 ### Model registry / champion model

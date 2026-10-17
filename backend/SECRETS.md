@@ -16,6 +16,8 @@ Setting `ENVIRONMENT=production` (or `staging`) makes the app refuse to start if
 | `OPENAI_API_KEY` | Embeddings for RAG knowledge retrieval (`text-embedding-3-small`) | `app/services/rag/embedding.py` |
 | `GROQ_API_KEY` | LLM draft generation (Module G response drafting) | `app/services/rag/generation.py` |
 | `CORS_ALLOWED_ORIGIN` | Not a secret — the exact frontend origin allowed to call the API | `app/main.py` |
+| `SENTRY_DSN` | Error tracking (issue #16). Unset (the default everywhere) means `init_sentry()` is a complete no-op — not required for the app to start | `app/core/error_tracking.py` |
+| `SENTRY_TRACES_SAMPLE_RATE` | Not a secret — Sentry performance-tracing sample rate (0.0-1.0, default 0). Error capture works regardless of this value | `app/core/error_tracking.py` |
 
 ## What's still missing for a real deployment
 
