@@ -27,3 +27,4 @@ groq==0.4.2
 PyJWT==2.7.0
 bcrypt==5.0.0
 email-validator==2.3.0
+pytesseract==0.3.13

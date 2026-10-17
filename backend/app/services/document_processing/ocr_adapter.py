@@ -1,9 +1,13 @@
 import abc
+import io
 import json
 import hashlib
+import logging
 from typing import Dict, Any, List
 
 from app.services.intelligence import IntelligenceError
+
+logger = logging.getLogger(__name__)
 
 class OCRAdapterInterface(abc.ABC):
     """
@@ -92,6 +96,122 @@ class DeterministicOCRAdapter(OCRAdapterInterface):
             "layout_blocks": blocks,
             "source_reference": page_artifact_key
         }
+
+class TesseractOCRAdapter(OCRAdapterInterface):
+    """
+    Real OCR implementation backed by the Tesseract engine (via pytesseract).
+
+    Downloads the already-preprocessed page artifact that ImageProcessor/
+    PDFProcessor uploaded to object storage (page_artifact_key), runs
+    Tesseract's word-level recognition, and groups words into per-line
+    layout_blocks matching the same {text, confidence, bbox, block_type}
+    contract DeterministicOCRAdapter produces. Requires the tesseract-ocr
+    system package to be installed (see requirements.txt / Dockerfiles).
+    """
+
+    def __init__(self, timeout_seconds: int = 30):
+        self.timeout_seconds = timeout_seconds
+
+    def perform_ocr(self, page_artifact_key: str, width: int, height: int, page_number: int) -> dict:
+        if not page_artifact_key:
+            raise IntelligenceError("OCR_INVALID_OUTPUT", "Missing page artifact key")
+
+        from app.core.storage import storage_client
+
+        try:
+            raw_bytes = storage_client.download_file(page_artifact_key)
+        except Exception as e:
+            raise IntelligenceError("OCR_INVALID_OUTPUT", f"Could not read page artifact {page_artifact_key}: {e}") from e
+
+        try:
+            import pytesseract
+            from pytesseract import Output
+            from PIL import Image
+
+            with Image.open(io.BytesIO(raw_bytes)) as img:
+                img.load()
+                data = pytesseract.image_to_data(
+                    img, output_type=Output.DICT, timeout=self.timeout_seconds
+                )
+        except RuntimeError as e:
+            raise IntelligenceError("OCR_TIMEOUT", f"Tesseract timed out on {page_artifact_key}: {e}") from e
+        except IntelligenceError:
+            raise
+        except Exception as e:
+            raise IntelligenceError("OCR_INVALID_OUTPUT", f"Tesseract OCR failed on {page_artifact_key}: {e}") from e
+
+        return self._to_standard_result(data, width, height, page_number, page_artifact_key)
+
+    @staticmethod
+    def _to_standard_result(data: Dict[str, list], width: int, height: int, page_number: int, source_reference: str) -> dict:
+        # Group Tesseract's word-level rows (level 5) into per-line blocks.
+        lines: Dict[tuple, Dict[str, Any]] = {}
+        n = len(data.get("text", []))
+
+        for i in range(n):
+            word = (data["text"][i] or "").strip()
+            if not word:
+                continue
+            try:
+                conf = float(data["conf"][i])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if conf < 0:  # Tesseract marks non-text rows with conf == -1
+                continue
+
+            key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+            left, top = data["left"][i], data["top"][i]
+            right, bottom = left + data["width"][i], top + data["height"][i]
+
+            line = lines.setdefault(key, {
+                "words": [], "confs": [], "x0": left, "y0": top, "x1": right, "y1": bottom,
+            })
+            line["words"].append(word)
+            line["confs"].append(conf)
+            line["x0"] = min(line["x0"], left)
+            line["y0"] = min(line["y0"], top)
+            line["x1"] = max(line["x1"], right)
+            line["y1"] = max(line["y1"], bottom)
+
+        blocks = []
+        for line in sorted(lines.values(), key=lambda l: (l["y0"], l["x0"])):
+            bbox = [
+                max(0, line["x0"]),
+                max(0, line["y0"]),
+                min(line["x1"], width),
+                min(line["y1"], height),
+            ]
+            if bbox[0] > bbox[2] or bbox[1] > bbox[3]:
+                continue
+            blocks.append({
+                "text": " ".join(line["words"]),
+                "confidence": round(sum(line["confs"]) / len(line["confs"]) / 100.0, 4),
+                "bbox": bbox,
+                "block_type": "text",
+            })
+
+        full_text = "\n".join(b["text"] for b in blocks)
+        overall_confidence = (
+            round(sum(b["confidence"] for b in blocks) / len(blocks), 4) if blocks else 0.0
+        )
+
+        return {
+            "page_number": page_number,
+            "text": full_text,
+            "confidence": overall_confidence,
+            "layout_blocks": blocks,
+            "source_reference": source_reference,
+        }
+
+
+def get_ocr_adapter() -> OCRAdapterInterface:
+    """Returns the configured OCR adapter (settings.OCR_ENGINE: 'deterministic' or 'tesseract')."""
+    from app.core.config import settings
+
+    if settings.OCR_ENGINE == "tesseract":
+        return TesseractOCRAdapter()
+    return DeterministicOCRAdapter()
+
 
 def validate_ocr_result(result: dict, width: int, height: int):
     """

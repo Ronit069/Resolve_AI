@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     MAX_IMAGE_WIDTH: int = Field(default=8000, description="Maximum image width in pixels")
     MAX_IMAGE_HEIGHT: int = Field(default=8000, description="Maximum image height in pixels")
     MIN_NATIVE_TEXT_LENGTH: int = Field(default=50, description="Minimum characters for native text to be considered usable")
+    OCR_ENGINE: str = Field(
+        default="deterministic",
+        description="Which OCR adapter app.worker.tasks uses: 'deterministic' (canned output, "
+        "for dev/test) or 'tesseract' (real OCR via pytesseract, requires the tesseract-ocr "
+        "system package).",
+    )
 
     # Module G: Retrieval
     RETRIEVAL_TOP_K: int = Field(default=5, description="Number of top results to return during knowledge retrieval")
