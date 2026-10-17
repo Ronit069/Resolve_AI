@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: resolve_user
+          POSTGRES_PASSWORD: resolve_password
+          POSTGRES_DB: resolve_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U resolve_user"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      POSTGRES_USER: resolve_user
+      POSTGRES_PASSWORD: resolve_password
+      POSTGRES_DB: resolve_db
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      REDIS_URL: redis://localhost:6379/0
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_ACCESS_KEY: minio_admin
+      S3_SECRET_KEY: minio_password
+      S3_BUCKET_NAME: test-bucket
+      API_SECRET_KEY: ci-test-secret
+      RAZORPAY_WEBHOOK_SECRET: ci-test-secret
+      RAZORPAY_KEY_ID: rzp_test_dummykeyid
+      RAZORPAY_KEY_SECRET: ci-test-secret
+      RAZORPAY_ALLOW_LIVE_MODE: "False"
+      ENVIRONMENT: ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install moto[server]==5.0.5
+
+      - name: Enable pgvector extension
+        run: PGPASSWORD=resolve_password psql -h localhost -U resolve_user -d resolve_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      - name: Run Alembic migrations
+        working-directory: backend
+        run: python -m alembic upgrade head
+
+      - name: Start moto S3 mock
+        run: |
+          nohup python -m moto.server -p 9000 > /tmp/moto.log 2>&1 &
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:9000 > /dev/null && break
+            sleep 1
+          done
+
+      - name: Run backend test suite
+        working-directory: backend
+        run: python -m pytest tests/ -q
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend test suite
+        working-directory: frontend
+        run: npm test -- --run
