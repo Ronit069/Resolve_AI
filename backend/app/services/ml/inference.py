@@ -9,8 +9,10 @@ that calls model.predict_proba on live traffic -- everything upstream
 (feature_snapshot.py) and downstream (review/queue.py) is unchanged.
 
 Never fabricates a prediction: if there is no current feature snapshot,
-or no champion artifacts are available on this machine, score_case()
-returns None and the caller leaves the case exactly where it was.
+or no champion has been promoted on this machine (see
+mlops/model_registry.promote_candidate_from_disk and
+scripts/promote_champion.py), score_case() returns None and the caller
+leaves the case exactly where it was.
 """
 
 import logging
@@ -25,7 +27,6 @@ from app.models.module_f import RiskPrediction
 from app.models.shared import Case
 from app.services.ml.training.preprocessor import Preprocessor
 from app.services.mlops.champion_loader import ChampionArtifactsUnavailable, load_champion_artifacts
-from app.services.mlops.model_registry import register_champion_from_artifacts
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +76,10 @@ def score_case(db: Session, case_id: uuid.UUID) -> Optional[RiskPrediction]:
         return existing
 
     try:
-        artifacts = load_champion_artifacts()
+        artifacts = load_champion_artifacts(db)
     except ChampionArtifactsUnavailable as exc:
         logger.warning(f"Risk scoring skipped for case {case_id}: {exc}")
         return None
-
-    model_version, decision_policy = register_champion_from_artifacts(db, artifacts)
 
     preprocessor = Preprocessor()
     example = [{"features": snapshot.features_json, "label": 0}]
@@ -102,8 +101,8 @@ def score_case(db: Session, case_id: uuid.UUID) -> Optional[RiskPrediction]:
     prediction = RiskPrediction(
         case_id=case_id,
         feature_snapshot_id=snapshot.id,
-        model_version_id=model_version.id,
-        decision_policy_id=decision_policy.id,
+        model_version_id=artifacts.model_version_id,
+        decision_policy_id=artifacts.decision_policy_id,
         raw_score=raw_score,
         calibrated_probability=calibrated_probability,
         recommendation=recommendation,

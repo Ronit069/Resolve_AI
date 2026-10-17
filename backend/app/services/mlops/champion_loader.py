@@ -1,14 +1,23 @@
 """
-Module F — live champion model loader (read-only).
+Module F / L — champion model loading.
 
-Loads the frozen CatBoost model + isotonic calibrator + locked 3-way
-decision policy that the offline pipeline (train_benchmark.py ->
-calibrate_winner_step13.py -> optimize_thresholds_step14.py) already
-produced under artifacts/. Never trains, calibrates, re-optimizes, or
-touches test_holdout -- mirrors the same "offline script writes
-artifacts/, app/ reads them" convention as evaluation_artifact.py, for
-the model/calibrator/policy triad a live scorer needs instead of the
-Step 15 evaluation result.
+Two distinct reads, kept separate on purpose:
+
+  load_candidate_artifacts_from_disk() -- scans artifacts/ for the latest
+  model/calibrator/policy (and, if present, step15 holdout evaluation)
+  written by the offline pipeline. This is "what's sitting on disk",
+  never what live traffic is scored with.
+
+  load_champion_artifacts(db) -- loads the exact model/calibrator/policy
+  files referenced by the registry's current active ModelVersion /
+  ModelDecisionPolicy rows. This is "what live traffic is scored with",
+  and never falls back to "latest on disk" -- a new candidate only
+  becomes live once model_registry.promote_candidate_from_disk() has
+  evaluated and approved it.
+
+Neither function trains, calibrates, re-optimizes, or touches
+test_holdout -- mirrors the same "offline script writes artifacts/,
+app/ reads them" convention as evaluation_artifact.py.
 """
 
 import hashlib
@@ -17,14 +26,16 @@ import os
 import pickle
 from dataclasses import dataclass
 from typing import Optional
+from uuid import UUID
 
 import catboost
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 
 
 class ChampionArtifactsUnavailable(Exception):
-    """Raised when no trained champion model/calibrator/policy exists on disk yet."""
+    """Raised when no trained/promoted champion model/calibrator/policy is available."""
 
 
 def _get_latest_dir(parent_dir: str, match_str: str, exclude_str: Optional[str] = None) -> Optional[str]:
@@ -38,6 +49,47 @@ def _get_latest_dir(parent_dir: str, match_str: str, exclude_str: Optional[str] 
     # Timestamp-named directories sort lexicographically = chronologically,
     # the same convention get_latest_dir() uses throughout the pipeline.
     return sorted(dirs)[-1]
+
+
+def _load_holdout_metrics(artifacts_dir: str, model_run_dir: str, policy_run_dir: str) -> Optional[dict]:
+    """
+    Best-effort read of the step15 final_evaluation.json, if the offline
+    pipeline has run it for exactly this model_run_dir/policy_run_dir
+    pair. Returns None (not an error) when it hasn't -- step15 is a
+    one-time, explicitly-authorized step and isn't required for every
+    model that ever lands on disk. The latest step15 directory present
+    is only trusted when it names THIS model run and THIS policy run as
+    what it evaluated; otherwise it's a stale eval of a previous model
+    still sitting on disk, and treating it as current would let an
+    untested retrain look already-verified.
+    """
+    f15_dir = _get_latest_dir(artifacts_dir, "step15_final_holdout_eval")
+    if not f15_dir:
+        return None
+    eval_path = os.path.join(artifacts_dir, f15_dir, "final_evaluation.json")
+    if not os.path.isfile(eval_path):
+        return None
+    with open(eval_path) as f:
+        evaluation = json.load(f)
+
+    evaluated_model_run_dir = evaluation.get("champion_model", {}).get("run_dir")
+    evaluated_policy_run_dir = evaluation.get("decision_policy", {}).get("step14_dir")
+    if evaluated_model_run_dir != model_run_dir or evaluated_policy_run_dir != policy_run_dir:
+        return None
+
+    metrics = evaluation.get("metrics", {})
+    policy = evaluation.get("decision_policy", {})
+    return {
+        "expected_cost": metrics.get("expected_cost"),
+        "precision": metrics.get("precision"),
+        "recall": metrics.get("recall"),
+        "f1": metrics.get("f1"),
+        "brier_score_calibrated": metrics.get("brier_score_calibrated"),
+        "c_fp": policy.get("c_fp"),
+        "c_fn": policy.get("c_fn"),
+        "c_review": policy.get("c_review"),
+        "holdout_eval_dir": f15_dir,
+    }
 
 
 @dataclass
@@ -55,13 +107,45 @@ class ChampionArtifacts:
     calibrator_path: str
     calibration_dir: str
     policy_dir: str
+    holdout_metrics: Optional[dict] = None
+    model_version_id: Optional[UUID] = None
+    decision_policy_id: Optional[UUID] = None
 
 
-def load_champion_artifacts() -> ChampionArtifacts:
+def _load_artifacts_from_paths(model_path: str, calibrator_path: str, policy: dict) -> ChampionArtifacts:
+    hasher = hashlib.sha256()
+    with open(model_path, "rb") as f:
+        hasher.update(f.read())
+    model_sha256 = hasher.hexdigest()
+
+    model = catboost.CatBoostClassifier()
+    model.load_model(model_path)
+
+    with open(calibrator_path, "rb") as f:
+        calibrator = pickle.load(f)
+
+    return ChampionArtifacts(
+        model=model,
+        calibrator=calibrator,
+        model_sha256=model_sha256,
+        t_accept=float(policy["t_accept"]),
+        t_contest=float(policy["t_contest"]),
+        c_fp=float(policy["c_fp"]),
+        c_fn=float(policy["c_fn"]),
+        c_review=float(policy["c_review"]),
+        model_run_dir=os.path.dirname(model_path),
+        model_cbm_path=model_path,
+        calibrator_path=calibrator_path,
+        calibration_dir=policy.get("_calibration_dir", ""),
+        policy_dir=policy.get("_policy_dir", ""),
+    )
+
+
+def load_candidate_artifacts_from_disk() -> ChampionArtifacts:
     """
-    Loads the latest champion model/calibrator/policy from disk. Raises
-    ChampionArtifactsUnavailable -- never returns a fabricated/default
-    model -- if any piece is missing on this machine.
+    Loads the latest model/calibrator/policy found under artifacts/ on
+    this machine -- a candidate for promotion, NOT what live scoring
+    uses. Raises ChampionArtifactsUnavailable if any piece is missing.
     """
     artifacts_dir = settings.MODEL_EVALUATION_ARTIFACT_DIR
     runs_dir = os.path.join(artifacts_dir, "runs")
@@ -72,10 +156,10 @@ def load_champion_artifacts() -> ChampionArtifacts:
 
     if not (f6_dir and f13_dir and f14_dir):
         raise ChampionArtifactsUnavailable(
-            "No trained champion model/calibrator/policy found under "
+            "No trained candidate model/calibrator/policy found under "
             f"'{artifacts_dir}/'. Run the offline pipeline (train_benchmark.py -> "
             "calibrate_winner_step13.py -> optimize_thresholds_step14.py) on this "
-            "machine, or deploy its artifacts/, before live risk scoring can run."
+            "machine, or deploy its artifacts/, before a champion can be promoted."
         )
 
     model_path = os.path.join(runs_dir, f6_dir, "model.cbm")
@@ -88,32 +172,59 @@ def load_champion_artifacts() -> ChampionArtifacts:
             f"'{artifacts_dir}/' but one or more expected files are missing."
         )
 
-    hasher = hashlib.sha256()
-    with open(model_path, "rb") as f:
-        hasher.update(f.read())
-    model_sha256 = hasher.hexdigest()
-
-    model = catboost.CatBoostClassifier()
-    model.load_model(model_path)
-
-    with open(calibrator_path, "rb") as f:
-        calibrator = pickle.load(f)
-
     with open(policy_path) as f:
         policy = json.load(f)
+    policy["_calibration_dir"] = f13_dir
+    policy["_policy_dir"] = f14_dir
 
-    return ChampionArtifacts(
-        model=model,
-        calibrator=calibrator,
-        model_sha256=model_sha256,
-        t_accept=float(policy["t_accept"]),
-        t_contest=float(policy["t_contest"]),
-        c_fp=float(policy["c_fp"]),
-        c_fn=float(policy["c_fn"]),
-        c_review=float(policy["c_review"]),
-        model_run_dir=f6_dir,
-        model_cbm_path=model_path,
-        calibrator_path=calibrator_path,
-        calibration_dir=f13_dir,
-        policy_dir=f14_dir,
-    )
+    artifacts = _load_artifacts_from_paths(model_path, calibrator_path, policy)
+    artifacts.holdout_metrics = _load_holdout_metrics(artifacts_dir, f6_dir, f14_dir)
+    return artifacts
+
+
+def load_champion_artifacts(db: Session) -> ChampionArtifacts:
+    """
+    Loads the model/calibrator/policy that the registry currently
+    recognizes as champion -- the exact files referenced by the active
+    ModelVersion / ModelDecisionPolicy rows. Never falls back to
+    "latest on disk": a newer artifact set only becomes live once
+    model_registry.promote_candidate_from_disk() has evaluated and
+    approved it. Raises ChampionArtifactsUnavailable if no champion has
+    ever been promoted, or its files are no longer on disk.
+    """
+    from app.services.mlops.model_registry import get_active_policy, get_champion_model_version
+
+    champion_version = get_champion_model_version(db, algorithm="CatBoost")
+    if champion_version is None:
+        raise ChampionArtifactsUnavailable(
+            "No champion model has been promoted yet. Run scripts/promote_champion.py "
+            "after generating artifacts/ to promote a model before live risk scoring can run."
+        )
+
+    policy_row = get_active_policy(db, champion_version.id)
+    if policy_row is None:
+        raise ChampionArtifactsUnavailable(
+            f"Champion ModelVersion {champion_version.id} has no active ModelDecisionPolicy."
+        )
+
+    model_path = champion_version.artifact_uri
+    calibrator_path = champion_version.calibrator_uri
+    if not (model_path and os.path.isfile(model_path) and calibrator_path and os.path.isfile(calibrator_path)):
+        raise ChampionArtifactsUnavailable(
+            f"Champion ModelVersion {champion_version.id} references artifacts no longer "
+            f"present on disk (model={model_path}, calibrator={calibrator_path})."
+        )
+
+    policy = {
+        "t_accept": policy_row.accept_threshold,
+        "t_contest": policy_row.contest_threshold,
+        "c_fp": policy_row.fp_cost,
+        "c_fn": policy_row.fn_cost,
+        "c_review": policy_row.review_cost,
+        "_policy_dir": policy_row.policy_version or "",
+    }
+
+    artifacts = _load_artifacts_from_paths(model_path, calibrator_path, policy)
+    artifacts.model_version_id = champion_version.id
+    artifacts.decision_policy_id = policy_row.id
+    return artifacts
