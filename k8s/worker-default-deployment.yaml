@@ -1,0 +1,68 @@
+# Lightweight tasks: enrichment, evidence validation, risk scoring,
+# external actions -- everything except process_evidence_document_task
+# (see worker-documents-deployment.yaml and k8s/README.md).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resolveai-worker-default
+  labels:
+    app: resolveai-worker-default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: resolveai-worker-default
+  template:
+    metadata:
+      labels:
+        app: resolveai-worker-default
+    spec:
+      containers:
+        - name: worker
+          image: resolveai-worker:latest # built from backend/Dockerfile.worker
+          command: ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "-Q", "celery"]
+          envFrom:
+            - secretRef:
+                name: resolveai-secrets
+            - configMapRef:
+                name: resolveai-config
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            exec:
+              command:
+                - celery
+                - -A
+                - app.worker.celery_app
+                - inspect
+                - ping
+                - -d
+                - "celery@$(HOSTNAME)"
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 3
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: resolveai-worker-default-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: resolveai-worker-default
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

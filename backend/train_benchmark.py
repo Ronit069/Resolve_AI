@@ -124,7 +124,39 @@ def main():
     meta_path = os.path.join(run_dir, "metadata.json")
     with open(meta_path, "w") as f:
         json.dump(metadata, f, indent=2)
-        
+
+    # Module L, L-01/L-02/L-03: best-effort MLflow tracking (issue #15).
+    # train_lightgbm_comparator.py has logged its runs here since Module L
+    # landed, but this script -- the one that actually produces what
+    # promote_champion.py promotes -- never did, so MLflow only ever had a
+    # record of the comparator model, never the real champion. Tagging
+    # model_artifact_sha256 with the exact same model_cbm_sha256 this run's
+    # metadata.json (and, on promotion, ModelVersion.preprocessing_hash)
+    # already uses is what makes an MLflow run, a promoted ModelVersion row,
+    # and the object-storage artifact (champion_loader.py) the same "what
+    # model is where" by a single lookup key, not three disconnected ones.
+    from app.services.mlops.mlflow_tracking import log_training_run
+
+    log_training_run(
+        experiment_name="resolveai_risk_model",
+        run_name=os.path.basename(run_dir),
+        params={
+            "model_type": metadata["algorithm"],
+            "training_seed": metadata["training_seed"],
+            **{f"hp_{k}": v for k, v in metadata["hyperparameters"].items()},
+            **{f"cost_{k}": v for k, v in metadata["cost_configuration"].items()},
+        },
+        metrics=metrics,
+        tags={
+            "algorithm": "catboost",
+            "train_dataset_hash": train_sha,
+            "validation_dataset_hash": val_sha,
+            "catboost_version": catboost.__version__,
+            "model_artifact_sha256": model_sha,
+        },
+        artifact_dir=run_dir,
+    )
+
     print(f"\n================== TRAINING COMPLETE ==================")
     print(f"Run Directory: {run_dir}")
     print(f"Model Hashes: {model_sha}")

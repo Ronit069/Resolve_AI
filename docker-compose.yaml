@@ -1,8 +1,11 @@
-version: '3.8'
-
 services:
   postgres:
-    image: pgvector/pgvector:pg15
+    # Matches .github/workflows/ci.yml's postgres service exactly --
+    # previously pg15 here vs pg16 in CI, so this compose setup was never
+    # actually running against the same Postgres version the test suite
+    # (and Alembic migrations) are validated against.
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: resolve_user
       POSTGRES_PASSWORD: resolve_password
@@ -19,11 +22,24 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
 
+  # minio/minio on Docker Hub (and the quay.io/minio/minio mirror) no
+  # longer resolve for an anonymous pull -- MinIO Inc. discontinued free
+  # Docker Hub/quay.io distribution of the AGPLv3 community edition
+  # (confirmed: Docker Hub's own API now returns "object not found" for
+  # the minio/minio repository, reproduced directly against Hub, not a
+  # registry-specific quirk). cgr.dev/chainguard/minio is Chainguard's
+  # free, actively-published equivalent, distroless (no shell/curl) --
+  # the previous curl-based healthcheck can't run in it, so api/worker
+  # now depend on minio only via service_started, not service_healthy;
+  # StorageClient's existing BotoCoreError/ClientError handling already
+  # degrades gracefully if it's not immediately ready.
   minio:
-    image: minio/minio:latest
+    image: cgr.dev/chainguard/minio:latest
+    restart: unless-stopped
     environment:
       MINIO_ROOT_USER: minio_admin
       MINIO_ROOT_PASSWORD: minio_password
@@ -33,20 +49,23 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
 
   # Module L: optional/local experiment tracking (frozen PO decision — no
   # live external MLflow, no production credentials). Backed by a local
   # volume, not a managed/hosted service.
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
+    restart: unless-stopped
+    # Issue #15: mlflow>=3.0 put the bare-filesystem backend store into
+    # maintenance mode (it now raises instead of working) -- a sqlite:///
+    # URI inside the same mounted volume is the same "local/self-hosted
+    # only" decision (no server-managed external DB, no production
+    # credential) and isn't deprecated. --default-artifact-root stays a
+    # plain path: only the backend *store* (run metadata) was deprecated,
+    # never the artifact store.
     command: >
       mlflow server --host 0.0.0.0 --port 5000
-      --backend-store-uri /mlruns --default-artifact-root /mlruns
+      --backend-store-uri sqlite:////mlruns/mlflow.db --default-artifact-root /mlruns
     ports:
       - "5001:5000"
     volumes:
@@ -58,6 +77,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.api
+    restart: unless-stopped
     env_file:
       - ./backend/.env
     environment:
@@ -74,14 +94,20 @@ services:
       redis:
         condition: service_started
       minio:
-        condition: service_healthy
+        condition: service_started
 
   # Module L: Celery worker (app/worker/tasks.py etc.), containerized —
-  # same code/deps as the existing (non-containerized) dev setup.
+  # same code/deps as the existing (non-containerized) dev setup. Issue
+  # #17: restart: unless-stopped is this single-host deployment's
+  # restart policy for a crashed worker. It consumes both the default
+  # and "documents" queues (Dockerfile.worker's CMD) since this is one
+  # process -- see k8s/ for the independently-scaled split used anywhere
+  # with more than one worker host.
   worker:
     build:
       context: ./backend
       dockerfile: Dockerfile.worker
+    restart: unless-stopped
     env_file:
       - ./backend/.env
     environment:
@@ -96,12 +122,13 @@ services:
       redis:
         condition: service_started
       minio:
-        condition: service_healthy
+        condition: service_started
 
   # Module L: Module I frontend, containerized as a static build served by nginx.
   web:
     build:
       context: ./frontend
+    restart: unless-stopped
     ports:
       - "5173:80"
     depends_on:

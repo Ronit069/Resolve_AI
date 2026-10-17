@@ -37,9 +37,18 @@ def test_compose_file_is_valid_yaml_with_expected_services():
         assert expected in services, f"missing service: {expected}"
 
     # Existing infra service definitions are preserved, not redesigned.
-    assert services["postgres"]["image"] == "pgvector/pgvector:pg15"
+    # postgres bumped pg15 -> pg16 (issue #13): this compose file is now
+    # the only place pgvector/pgvector:pg15 was ever used -- ci.yml's own
+    # postgres service has run pg16 since CI was added, so this service
+    # was never actually running the Postgres version the Alembic
+    # migrations and test suite are validated against.
+    assert services["postgres"]["image"] == "pgvector/pgvector:pg16"
     assert services["redis"]["image"] == "redis:7-alpine"
-    assert services["minio"]["image"] == "minio/minio:latest"
+    # minio bumped minio/minio -> cgr.dev/chainguard/minio: MinIO Inc.
+    # discontinued free Docker Hub distribution of minio/minio (and the
+    # quay.io/minio/minio mirror) -- confirmed directly against Docker
+    # Hub's own API ("object not found"), not a transient registry issue.
+    assert services["minio"]["image"] == "cgr.dev/chainguard/minio:latest"
 
     assert services["api"]["build"]["dockerfile"] == "Dockerfile.api"
     assert services["worker"]["build"]["dockerfile"] == "Dockerfile.worker"

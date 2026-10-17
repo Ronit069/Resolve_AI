@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, model_validator
 
@@ -36,9 +38,16 @@ class Settings(BaseSettings):
     
     # Object Storage (MinIO)
     S3_ENDPOINT_URL: str = Field(..., description="MinIO/S3 Endpoint URL")
-    S3_ACCESS_KEY: str = Field(..., description="MinIO Access Key")
-    S3_SECRET_KEY: str = Field(..., description="MinIO Secret Key")
+    # Optional (issue #14): local dev/CI always set these (MinIO requires
+    # static credentials). A real AWS deployment can leave both unset to
+    # run on IAM-role-based credentials (ECS task role / EKS IRSA /
+    # instance profile) instead of long-lived static keys -- see
+    # StorageClient, which only passes them to boto3 when both are set,
+    # letting boto3's own default credential chain take over otherwise.
+    S3_ACCESS_KEY: Optional[str] = Field(default=None, description="S3/MinIO Access Key (omit to use IAM-role credentials)")
+    S3_SECRET_KEY: Optional[str] = Field(default=None, description="S3/MinIO Secret Key (omit to use IAM-role credentials)")
     S3_BUCKET_NAME: str = Field(..., description="MinIO Bucket Name")
+    S3_REGION: str = Field(default="us-east-1", description="S3 bucket region. MinIO ignores this; a real AWS bucket outside us-east-1 must set it to match or requests fail.")
     
     # Security (Minimal)
     API_SECRET_KEY: str = Field(..., description="API Secret Key")
@@ -54,6 +63,11 @@ class Settings(BaseSettings):
     
     # Features
     ENABLE_DEV_ENDPOINTS: bool = Field(default=False, description="Enable development endpoints")
+
+    # Module L: structured logging + error tracking (issue #16)
+    LOG_LEVEL: str = Field(default="INFO", description="Root logger level for the JSON logging configured in app/core/logging_config.py")
+    SENTRY_DSN: Optional[str] = Field(default=None, description="Sentry error-tracking DSN. Unset (the default) means no Sentry SDK traffic at all -- see app/core/error_tracking.py")
+    SENTRY_TRACES_SAMPLE_RATE: float = Field(default=0.0, description="Sentry performance-tracing sample rate, 0.0-1.0. 0 disables tracing; error capture is unaffected either way")
 
     # Module D: Document Intelligence Limits
     MAX_PDF_PAGES: int = Field(default=50, description="Maximum allowed pages in a PDF document")
@@ -94,7 +108,15 @@ class Settings(BaseSettings):
 
     # Module L: MLflow experiment tracking (local/self-hosted only per frozen PO decision).
     # Defaults to a local file store so training scripts work with zero external service.
-    MLFLOW_TRACKING_URI: str = Field(default="./mlruns", description="MLflow tracking URI — local file store by default, or the local/self-hosted mlflow compose service")
+    # Issue #15: mlflow>=3.0 put the bare-filesystem tracking backend
+    # ("./mlruns" as a plain path) into maintenance mode -- it now raises
+    # MlflowException instead of working, which silently broke this
+    # default (log_training_run's try/except swallowed it, so training
+    # kept succeeding, but no run was ever actually recorded). A
+    # sqlite:/// URI is the same "local/self-hosted only" frozen PO
+    # decision (no server process, no external/hosted service, no
+    # production credential) and isn't deprecated.
+    MLFLOW_TRACKING_URI: str = Field(default="sqlite:///mlflow.db", description="MLflow tracking URI — local SQLite file by default, or the local/self-hosted mlflow compose service")
 
     # Module L: authoritative Step 15 held-out evaluation artifact (read-only).
     # Matches the existing root-level ML pipeline scripts' own convention of

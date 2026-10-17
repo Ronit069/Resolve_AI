@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -6,8 +6,14 @@ import uuid
 
 from app.core.config import settings
 from app.core.database import engine, Base, get_db
+from app.core.logging_config import configure_logging, set_correlation_id, reset_correlation_id
+from app.core.error_tracking import init_sentry
 from app.models.shared import Merchant, AppUser
 from app.api.endpoints import auth, webhooks, dev, enrichment, evidence, intelligence, validation, generation, review, observability, queue, audit, outcome_webhooks, runtime_observability, model_evaluation, drift_monitoring
+
+configure_logging()
+init_sentry()
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Backend Foundation for Modules A, B, and C",
@@ -25,6 +31,25 @@ app.add_middleware(
     allow_headers=["Authorization", "X-User-Id", "Content-Type"],
     allow_credentials=False,
 )
+
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    """
+    Issue #16: every log line emitted while handling this request carries
+    the same correlation_id (app/core/logging_config.py's JSON formatter
+    attaches it automatically) -- reuses an inbound X-Request-ID so a
+    caller's own trace ID survives, generates one otherwise, and always
+    echoes it back so the caller can correlate on their side too.
+    """
+    correlation_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    token = set_correlation_id(correlation_id)
+    try:
+        response = await call_next(request)
+    finally:
+        reset_correlation_id(token)
+    response.headers["X-Request-ID"] = correlation_id
+    return response
 
 
 @app.get("/health")

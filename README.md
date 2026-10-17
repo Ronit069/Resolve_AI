@@ -91,13 +91,19 @@ Run the backend test suite with `pytest` (from `backend/`) and the frontend suit
 
 ## MLflow (experiment tracking)
 
-Module F's training scripts (`backend/train_lightgbm_comparator.py` and friends) log their existing params/metrics/dataset hashes to MLflow as a best-effort, additive step — a training run's actual computed result is identical whether or not MLflow is reachable (see `backend/app/services/mlops/mlflow_tracking.py`). By default `MLFLOW_TRACKING_URI` is a local file store (`./mlruns`); when running via `docker compose up`, the `api`/`worker` services point at the local `mlflow` compose service instead. There is no external/hosted MLflow and no production credential involved — this is a local/demo deployment, per the project's own hackathon framing.
+Both the real training pipeline (`backend/train_benchmark.py`, which produces what `promote_champion.py` actually promotes) and the LightGBM comparator (`backend/train_lightgbm_comparator.py`) log their existing params/metrics/dataset hashes to MLflow as a best-effort, additive step — a training run's actual computed result is identical whether or not MLflow is reachable (see `backend/app/services/mlops/mlflow_tracking.py`). Both tag `model_artifact_sha256` with the same hash their own `metadata.json` (and, once promoted, `ModelVersion.preprocessing_hash`) uses, so an MLflow run and a promoted model version are one lookup apart, not two disconnected records. By default `MLFLOW_TRACKING_URI` is a local SQLite file (`sqlite:///mlflow.db`); when running via `docker compose up`, the `api`/`worker` services point at the local `mlflow` compose service instead. There is no external/hosted MLflow and no production credential involved — this is a local/self-hosted deployment, per the project's own hackathon framing.
 
 To run a training script against the compose `mlflow` service:
 
 ```bash
 MLFLOW_TRACKING_URI=http://localhost:5001 python backend/train_lightgbm_comparator.py
 ```
+
+## Logging and error tracking
+
+Every log line the API and worker emit is structured JSON (`app/core/logging_config.py`) carrying a `correlation_id`: the API's HTTP middleware sets it from an inbound `X-Request-ID` header (generating one if absent, always echoing it back), and the worker sets it per Celery task from that task's own business identifier (`case_id`/`document_id`/`validation_run_id`/`outbox_id` — whichever that task was actually called with). A single failure in the ingestion → enrichment → evidence → validation → scoring chain can be traced by that one ID across every service's logs.
+
+Error tracking (`app/core/error_tracking.py`) is Sentry, entirely optional: unset `SENTRY_DSN` (the default everywhere, including CI) means zero Sentry SDK traffic. Set it to turn it on — no other code change needed.
 
 Then browse runs at http://localhost:5001.
 

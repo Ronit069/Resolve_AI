@@ -1,6 +1,6 @@
 from sqlalchemy import Column, String, Boolean, BigInteger, Integer, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import UUID
+from app.core.types import UUID
 from app.core.database import Base
 
 class WebhookEvent(Base):

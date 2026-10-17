@@ -16,7 +16,8 @@ from sqlalchemy import (
     ForeignKey, Numeric, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import UUID, JSON
+from sqlalchemy.dialects.postgresql import JSON
+from app.core.types import UUID
 from app.core.database import Base
 
 

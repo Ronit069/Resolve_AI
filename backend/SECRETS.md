@@ -8,7 +8,7 @@ Setting `ENVIRONMENT=production` (or `staging`) makes the app refuse to start if
 |---|---|---|
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` / `POSTGRES_HOST` / `POSTGRES_PORT` | Primary database connection (also used for pgvector-backed RAG tables) | `app/core/database.py` |
 | `REDIS_URL` | Celery broker + result backend | `app/worker/celery_app.py` |
-| `S3_ENDPOINT_URL` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_BUCKET_NAME` | Object storage for evidence documents, derived OCR artifacts, and RAG knowledge source text (MinIO locally, real S3 in a real deployment) | `app/core/storage.py`, `app/services/rag/ingestion.py`, `app/services/rag/chunking.py` |
+| `S3_ENDPOINT_URL` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_BUCKET_NAME` / `S3_REGION` | Object storage for evidence documents, derived OCR artifacts, and RAG knowledge source text (MinIO locally, real S3 in a real deployment). `S3_ACCESS_KEY`/`S3_SECRET_KEY` are optional — MinIO needs them, but a real AWS deployment can leave both unset to run on IAM-role credentials (ECS task role / EKS IRSA / instance profile) instead of long-lived static keys. `S3_REGION` defaults to `us-east-1` for MinIO compatibility; a real bucket outside that region must set it to match | `app/core/storage.py`, `app/services/rag/ingestion.py`, `app/services/rag/chunking.py` |
 | `API_SECRET_KEY` | **Currently also doubles as the JWT signing secret** for the real-auth login flow (`app/core/security.py`) — rotating it invalidates every issued token | `app/core/security.py` |
 | `RAZORPAY_WEBHOOK_SECRET` | HMAC verification of inbound Razorpay webhooks | `app/api/endpoints/webhooks.py`, `app/api/endpoints/outcome_webhooks.py` |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | Basic Auth credentials against the real Razorpay API (Module J external actions: document upload, contest submission) | `app/services/external_action/razorpay_client.py` |
@@ -16,6 +16,8 @@ Setting `ENVIRONMENT=production` (or `staging`) makes the app refuse to start if
 | `OPENAI_API_KEY` | Embeddings for RAG knowledge retrieval (`text-embedding-3-small`) | `app/services/rag/embedding.py` |
 | `GROQ_API_KEY` | LLM draft generation (Module G response drafting) | `app/services/rag/generation.py` |
 | `CORS_ALLOWED_ORIGIN` | Not a secret — the exact frontend origin allowed to call the API | `app/main.py` |
+| `SENTRY_DSN` | Error tracking (issue #16). Unset (the default everywhere) means `init_sentry()` is a complete no-op — not required for the app to start | `app/core/error_tracking.py` |
+| `SENTRY_TRACES_SAMPLE_RATE` | Not a secret — Sentry performance-tracing sample rate (0.0-1.0, default 0). Error capture works regardless of this value | `app/core/error_tracking.py` |
 
 ## What's still missing for a real deployment
 

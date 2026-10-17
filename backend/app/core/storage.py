@@ -14,14 +14,20 @@ class StorageUnavailableError(Exception):
 
 class StorageClient:
     def __init__(self):
-        self.s3_client = boto3.client(
-            's3',
-            endpoint_url=settings.S3_ENDPOINT_URL,
-            aws_access_key_id=settings.S3_ACCESS_KEY,
-            aws_secret_access_key=settings.S3_SECRET_KEY,
-            config=Config(signature_version='s3v4'),
-            region_name='us-east-1' # Default for MinIO compatibility
-        )
+        client_kwargs = {
+            "endpoint_url": settings.S3_ENDPOINT_URL,
+            "config": Config(signature_version='s3v4'),
+            "region_name": settings.S3_REGION,
+        }
+        # MinIO always needs explicit static credentials; a real AWS
+        # deployment can omit both to use IAM-role-based credentials
+        # (ECS task role / EKS IRSA / instance profile) instead -- see
+        # Settings.S3_ACCESS_KEY/S3_SECRET_KEY.
+        if settings.S3_ACCESS_KEY and settings.S3_SECRET_KEY:
+            client_kwargs["aws_access_key_id"] = settings.S3_ACCESS_KEY
+            client_kwargs["aws_secret_access_key"] = settings.S3_SECRET_KEY
+
+        self.s3_client = boto3.client('s3', **client_kwargs)
         self.bucket = settings.S3_BUCKET_NAME
         self._ensure_bucket_exists()
 

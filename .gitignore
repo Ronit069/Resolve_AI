@@ -13,8 +13,12 @@ __pycache__/
 
 # Local databases
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
+dump.rdb
 
 # Test/cache
 .pytest_cache/
@@ -33,9 +37,13 @@ Thumbs.db
 # Local/generated ML artifacts
 backend/artifacts/
 backend/catboost_info/
+backend/mlruns/
 
 # Local databases
 backend/*.db
+backend/*.db-journal
+backend/*.db-wal
+backend/*.db-shm
 backend/*.sqlite
 backend/*.sqlite3
 
