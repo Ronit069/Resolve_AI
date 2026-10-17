@@ -1,7 +1,16 @@
+import logging
+
 import boto3
 from botocore.client import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class StorageUnavailableError(Exception):
+    """Object storage could not be reached or an operation failed at the transport level."""
+
 
 class StorageClient:
     def __init__(self):
@@ -22,8 +31,14 @@ class StorageClient:
         except ClientError:
             try:
                 self.s3_client.create_bucket(Bucket=self.bucket)
-            except Exception as e:
-                print(f"Error creating bucket {self.bucket}: {e}")
+            except (ClientError, BotoCoreError) as e:
+                logger.error(f"Error creating bucket {self.bucket}: {e}")
+        except BotoCoreError as e:
+            # Endpoint unreachable, connection timed out, no credentials, etc.
+            # Never let this crash the process at import time -- every call
+            # below will fail the same way (and report it) until the
+            # endpoint recovers.
+            logger.error(f"Object storage unreachable while checking bucket {self.bucket}: {e}")
 
     def upload_file(self, file_obj, object_name: str, content_type: str = 'application/octet-stream') -> bool:
         """Upload a file-like object to object storage"""
@@ -35,8 +50,8 @@ class StorageClient:
                 ExtraArgs={'ContentType': content_type}
             )
             return True
-        except ClientError as e:
-            print(f"Failed to upload file {object_name}: {e}")
+        except (ClientError, BotoCoreError) as e:
+            logger.error(f"Failed to upload file {object_name}: {e}")
             return False
 
     def generate_presigned_url(self, object_name: str, expiration=3600) -> str:
@@ -47,8 +62,8 @@ class StorageClient:
                                                             'Key': object_name},
                                                     ExpiresIn=expiration)
             return response
-        except ClientError as e:
-            print(f"Failed to generate presigned url for {object_name}: {e}")
+        except (ClientError, BotoCoreError) as e:
+            logger.error(f"Failed to generate presigned url for {object_name}: {e}")
             return None
 
     def delete_file(self, object_name: str) -> bool:
@@ -56,13 +71,17 @@ class StorageClient:
         try:
             self.s3_client.delete_object(Bucket=self.bucket, Key=object_name)
             return True
-        except ClientError as e:
-            print(f"Failed to delete file {object_name}: {e}")
+        except (ClientError, BotoCoreError) as e:
+            logger.error(f"Failed to delete file {object_name}: {e}")
             return False
 
     def download_file(self, object_name: str) -> bytes:
         """Read an object's full contents from storage (Module J, Category D: Razorpay document upload)."""
-        response = self.s3_client.get_object(Bucket=self.bucket, Key=object_name)
-        return response["Body"].read()
+        try:
+            response = self.s3_client.get_object(Bucket=self.bucket, Key=object_name)
+            return response["Body"].read()
+        except (ClientError, BotoCoreError) as e:
+            logger.error(f"Failed to download file {object_name}: {e}")
+            raise StorageUnavailableError(f"Failed to download {object_name}: {e}") from e
 
 storage_client = StorageClient()
