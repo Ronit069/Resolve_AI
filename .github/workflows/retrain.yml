@@ -1,0 +1,166 @@
+name: Model Retrain and Promote
+
+# Issue #12 -- automates what promote_champion.py has always been a human
+# running by hand: retrain -> evaluate_holdout_step15 -> promote, with a
+# human-approval gate before the promotion itself (job `promote`'s
+# `environment: model-promotion-approval`).
+#
+# SETUP REQUIRED (one-time, repo admin, not doable from this workflow
+# file): create a GitHub Environment named "model-promotion-approval"
+# under Settings -> Environments, and add at least one required reviewer
+# to it. Until that's configured, GitHub runs the `promote` job without
+# pausing for approval -- the `environment:` key alone does not create
+# the protection rule.
+#
+# A promoted champion going live is a one-way, production-affecting
+# action (this is exactly the "pipeline proposes, a person confirms"
+# model issue #12 asks for) -- never bypass the approval gate by removing
+# `environment:` from the `promote` job.
+#
+# rollback_champion.py exists for the "a promoted model turns out bad
+# live" case the holdout-metrics guardrail can't catch -- that's a
+# separate, ad-hoc operator action (run it directly against the target
+# environment), not wired into this workflow.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Weekly, Monday 03:00 UTC. Adjust/remove once there's a real
+    # retraining cadence decision (issue #12 is explicitly "nice-to-have
+    # workflow improvement", not a fixed schedule requirement).
+    - cron: "0 3 * * 1"
+
+jobs:
+  train-and-evaluate:
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_USER: resolve_user
+      POSTGRES_PASSWORD: resolve_password
+      POSTGRES_DB: resolve_db
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      REDIS_URL: redis://localhost:6379/0
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_ACCESS_KEY: minio_admin
+      S3_SECRET_KEY: minio_password
+      S3_BUCKET_NAME: test-bucket
+      API_SECRET_KEY: ci-test-secret
+      RAZORPAY_WEBHOOK_SECRET: ci-test-secret
+      RAZORPAY_KEY_ID: rzp_test_dummykeyid
+      RAZORPAY_KEY_SECRET: ci-test-secret
+      RAZORPAY_ALLOW_LIVE_MODE: "False"
+      ENVIRONMENT: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run offline retrain + evaluation pipeline
+        working-directory: backend
+        # Settings() only needs these env vars to be present to construct
+        # (see above) -- run_benchmark.py et al. use their own local
+        # SQLite file, never the Postgres/Redis/S3 these values name, so
+        # this step needs no live services.
+        run: |
+          python run_benchmark.py
+          python split_benchmark.py
+          python train_benchmark.py
+          python calibrate_winner_step13.py
+          python optimize_thresholds_step14.py
+          python evaluate_holdout_step15.py
+
+      - name: Upload candidate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-candidate-artifacts
+          path: backend/artifacts/
+          retention-days: 30
+
+  promote:
+    needs: train-and-evaluate
+    runs-on: ubuntu-latest
+    environment: model-promotion-approval
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: resolve_user
+          POSTGRES_PASSWORD: resolve_password
+          POSTGRES_DB: resolve_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U resolve_user -d resolve_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      POSTGRES_USER: resolve_user
+      POSTGRES_PASSWORD: resolve_password
+      POSTGRES_DB: resolve_db
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      REDIS_URL: redis://localhost:6379/0
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_ACCESS_KEY: minio_admin
+      S3_SECRET_KEY: minio_password
+      S3_BUCKET_NAME: test-bucket
+      API_SECRET_KEY: ci-test-secret
+      RAZORPAY_WEBHOOK_SECRET: ci-test-secret
+      RAZORPAY_KEY_ID: rzp_test_dummykeyid
+      RAZORPAY_KEY_SECRET: ci-test-secret
+      RAZORPAY_ALLOW_LIVE_MODE: "False"
+      ENVIRONMENT: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install moto[server]==5.0.5
+
+      - name: Download candidate artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: model-candidate-artifacts
+          path: backend/artifacts/
+
+      - name: Enable pgvector extension
+        run: PGPASSWORD=resolve_password psql -h localhost -U resolve_user -d resolve_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      - name: Run Alembic migrations
+        working-directory: backend
+        run: python -m alembic upgrade head
+
+      - name: Start moto S3 mock
+        run: |
+          nohup python -m moto.server -p 9000 > /tmp/moto.log 2>&1 &
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:9000 > /dev/null && break
+            sleep 1
+          done
+
+      - name: Promote candidate if it clears the holdout-cost guardrail
+        working-directory: backend
+        # promote_candidate_from_disk's own comparison against the
+        # current champion's recorded holdout expected_cost decides
+        # PROMOTED vs REJECTED -- this step never overrides that
+        # decision, it only runs it (the human-approval gate above is
+        # what's new; the guardrail logic itself is unchanged from
+        # #PR2's model_registry.py).
+        run: python promote_champion.py

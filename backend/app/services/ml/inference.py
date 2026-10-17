@@ -4,13 +4,17 @@ Module F — live risk scoring.
 Scores a case's current CaseFeatureSnapshot with the frozen champion
 model + calibrator + locked 3-way decision policy already produced by
 the offline pipeline (see mlops/champion_loader.py), and persists the
-result as a RiskPrediction. This is the only place in the application
-that calls model.predict_proba on live traffic -- everything upstream
-(feature_snapshot.py) and downstream (review/queue.py) is unchanged.
+result as a RiskPrediction, plus its top-contributing-feature SHAP
+explanations (see ml/explanations.py) as PredictionExplanation rows.
+This is the only place in the application that calls model.predict_proba
+on live traffic -- everything upstream (feature_snapshot.py) and
+downstream (review/queue.py) is unchanged.
 
 Never fabricates a prediction: if there is no current feature snapshot,
-or no champion artifacts are available on this machine, score_case()
-returns None and the caller leaves the case exactly where it was.
+or no champion has been promoted on this machine (see
+mlops/model_registry.promote_candidate_from_disk and
+scripts/promote_champion.py), score_case() returns None and the caller
+leaves the case exactly where it was.
 """
 
 import logging
@@ -21,11 +25,11 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from app.models.module_e import CaseFeatureSnapshot
-from app.models.module_f import RiskPrediction
+from app.models.module_f import PredictionExplanation, RiskPrediction
 from app.models.shared import Case
+from app.services.ml.explanations import compute_shap_explanations
 from app.services.ml.training.preprocessor import Preprocessor
 from app.services.mlops.champion_loader import ChampionArtifactsUnavailable, load_champion_artifacts
-from app.services.mlops.model_registry import register_champion_from_artifacts
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +79,10 @@ def score_case(db: Session, case_id: uuid.UUID) -> Optional[RiskPrediction]:
         return existing
 
     try:
-        artifacts = load_champion_artifacts()
+        artifacts = load_champion_artifacts(db)
     except ChampionArtifactsUnavailable as exc:
         logger.warning(f"Risk scoring skipped for case {case_id}: {exc}")
         return None
-
-    model_version, decision_policy = register_champion_from_artifacts(db, artifacts)
 
     preprocessor = Preprocessor()
     example = [{"features": snapshot.features_json, "label": 0}]
@@ -102,8 +104,8 @@ def score_case(db: Session, case_id: uuid.UUID) -> Optional[RiskPrediction]:
     prediction = RiskPrediction(
         case_id=case_id,
         feature_snapshot_id=snapshot.id,
-        model_version_id=model_version.id,
-        decision_policy_id=decision_policy.id,
+        model_version_id=artifacts.model_version_id,
+        decision_policy_id=artifacts.decision_policy_id,
         raw_score=raw_score,
         calibrated_probability=calibrated_probability,
         recommendation=recommendation,
@@ -112,4 +114,29 @@ def score_case(db: Session, case_id: uuid.UUID) -> Optional[RiskPrediction]:
     )
     db.add(prediction)
     db.flush()
+
+    # Explanations are a display aid, not part of the decision itself --
+    # a failure here (e.g. an unexpected SHAP/library error) is logged
+    # and swallowed so it never costs the case its prediction.
+    try:
+        explanations = compute_shap_explanations(
+            artifacts.model, X, preprocessor.categorical_features, snapshot.features_json
+        )
+    except Exception:
+        logger.exception(f"SHAP explanation generation failed for case {case_id}; prediction persisted without it.")
+        explanations = []
+
+    for explanation in explanations:
+        db.add(PredictionExplanation(
+            prediction_id=prediction.id,
+            rank=explanation["rank"],
+            feature_name=explanation["feature_name"],
+            feature_value=explanation["feature_value"],
+            contribution=explanation["contribution"],
+            direction=explanation["direction"],
+            display_text=explanation["display_text"],
+        ))
+    if explanations:
+        db.flush()
+
     return prediction

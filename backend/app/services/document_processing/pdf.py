@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.services.intelligence import IntelligenceError
 from app.models.module_d import DocumentPage
 from app.core.storage import storage_client
+from app.services.document_processing.preprocessor import StandardPreprocessor
 
 class PDFProcessor:
     @staticmethod
@@ -56,11 +57,13 @@ class PDFProcessor:
 
             artifact_key = None
             ocr_text_key = None
-            
+            preprocessing_metadata = None
+
             # If native text is insufficient, render page for OCR
             if not native_text_used:
                 pix = page.get_pixmap(dpi=150)
-                img_data = pix.tobytes("png")
+                raw_img_data = pix.tobytes("png")
+                img_data, preprocessing_metadata = StandardPreprocessor().preprocess_image(raw_img_data)
                 artifact_key = f"derived/{case_id}/{document_id}/{job_id}/page_{actual_page_number}.png"
                 storage_client.upload_file(io.BytesIO(img_data), artifact_key, content_type="image/png")
             else:
@@ -73,17 +76,29 @@ class PDFProcessor:
             rect = page.rect
             rotation = page.rotation
 
+            if preprocessing_metadata is not None:
+                # width_px/height_px describe the rendered+preprocessed
+                # artifact actually stored at artifact_key (what OCR bbox
+                # validation bounds against), not the PDF's native
+                # point-space page rect, which get_pixmap(dpi=150) and
+                # StandardPreprocessor's own resizing both change.
+                page_width_px = preprocessing_metadata["output_width_px"]
+                page_height_px = preprocessing_metadata["output_height_px"]
+            else:
+                page_width_px = int(rect.width)
+                page_height_px = int(rect.height)
+
             doc_page = DocumentPage(
                 job_id=job_id,
                 document_id=document_id,
                 page_number=actual_page_number,
-                width_px=int(rect.width),
-                height_px=int(rect.height),
+                width_px=page_width_px,
+                height_px=page_height_px,
                 rotation_degrees=rotation,
                 native_text_used=native_text_used,
                 page_artifact_key=artifact_key,
                 ocr_text_object_key=ocr_text_key,
-                preprocessing_json=None
+                preprocessing_json=preprocessing_metadata
             )
             
             pages_metadata.append(doc_page)

@@ -234,7 +234,7 @@ def test_service_module_never_computes_metrics_only_reads_json():
 
 def test_unauthenticated_request_is_rejected(client):
     response = client.get("/api/v1/observability/model-evaluation")
-    assert response.status_code == 422  # missing required X-User-Id header, same convention as sibling endpoints
+    assert response.status_code == 401  # no Authorization or X-User-Id credentials at all
 
 
 def test_unknown_user_id_is_rejected(client):

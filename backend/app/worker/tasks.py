@@ -177,11 +177,11 @@ def process_evidence_document_task(self, case_id: str, document_id: str, merchan
                 db.flush() # Ensure pages get IDs and are available to OCR phase
 
                 # Step 4 logic: OCR and Layout Provenance
-                from app.services.document_processing.ocr_adapter import DeterministicOCRAdapter, validate_ocr_result
+                from app.services.document_processing.ocr_adapter import get_ocr_adapter, validate_ocr_result
                 import json
                 import io
-                
-                ocr_adapter = DeterministicOCRAdapter()
+
+                ocr_adapter = get_ocr_adapter()
                 full_text_chunks = []
                 
                 for p in pages:

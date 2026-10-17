@@ -45,6 +45,10 @@ class AppUser(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     is_active = Column(Boolean, default=True)
     role = Column(Enum(AppUserRole), nullable=False, server_default="APPROVER", default=AppUserRole.APPROVER)
+    # Nullable: existing/seeded users have no password until one is set (see
+    # app/core/security.py). A user with password_hash=None cannot log in
+    # via POST /api/v1/auth/login -- there is no "empty password" bypass.
+    password_hash = Column(String(255), nullable=True)
     
     merchant = relationship("Merchant", back_populates="users")
 

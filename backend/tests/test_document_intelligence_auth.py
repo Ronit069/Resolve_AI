@@ -114,13 +114,12 @@ def test_no_identity_header_rejected():
     finally:
         db.close()
 
-    response = get_di(case_id)  # no X-User-Id header at all
-    # X-User-Id is a required header on the existing frozen get_current_user
-    # dependency, so FastAPI rejects the request at validation time (422)
-    # before get_current_user ever runs — same established convention as
-    # test_module_h_step22.py::test_endpoint_requires_auth_header and
-    # test_module_i_queue.py::test_queue_listing_requires_auth_header.
-    assert response.status_code == 422
+    response = get_di(case_id)  # no credentials at all (no Authorization, no X-User-Id)
+    # get_current_user requires either a Bearer token or (dev-only) an
+    # X-User-Id header; with neither present it raises 401 directly,
+    # rather than FastAPI rejecting at validation time the way a missing
+    # *required* header used to (422).
+    assert response.status_code == 401
 
 
 # B. Valid active user + same-tenant case -> success, response unchanged

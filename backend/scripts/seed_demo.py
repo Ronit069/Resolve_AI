@@ -47,6 +47,9 @@ DEMO_USERS = [
     ("demo.model_maintainer@resolveai.local", "MODEL_MAINTAINER"),
 ]
 DEMO_CASE_EXTERNAL_DISPUTE_ID = "demo_resolveai_seed_001"  # CONTEST path — preserved from the original seed
+# Overridable so a shared demo environment isn't stuck with this literal
+# value; every DEMO_USERS account gets the same password for simplicity.
+DEMO_USER_PASSWORD = os.environ.get("DEMO_USER_PASSWORD", "resolveai-demo-password")
 
 
 def run_migrations() -> None:
@@ -78,16 +81,27 @@ def seed_merchant(db):
 
 def seed_users(db, merchant):
     from app.models.shared import AppUser, AppUserRole
+    from app.core.security import hash_password
+
+    password_hash = hash_password(DEMO_USER_PASSWORD)
 
     for email, role_name in DEMO_USERS:
         existing = db.query(AppUser).filter(AppUser.email == email).first()
         if existing is not None:
-            print(f"User already seeded: {email}")
+            if existing.password_hash is None:
+                existing.password_hash = password_hash
+                db.commit()
+                print(f"Set password for previously-seeded demo user: {email}")
+            else:
+                print(f"User already seeded: {email}")
             continue
-        user = AppUser(merchant_id=merchant.merchant_id, email=email, is_active=True, role=AppUserRole(role_name))
+        user = AppUser(
+            merchant_id=merchant.merchant_id, email=email, is_active=True,
+            role=AppUserRole(role_name), password_hash=password_hash,
+        )
         db.add(user)
         db.commit()
-        print(f"Seeded demo user: {email} ({role_name})")
+        print(f"Seeded demo user: {email} ({role_name}), password: {DEMO_USER_PASSWORD}")
 
 
 def seed_reason_code_policy(db):

@@ -5,6 +5,7 @@ import { RoleGate } from "../RoleGate";
 
 vi.mock("../../api/client", () => ({
   setApiIdentity: vi.fn(),
+  setApiAccessToken: vi.fn(),
 }));
 
 beforeEach(() => {

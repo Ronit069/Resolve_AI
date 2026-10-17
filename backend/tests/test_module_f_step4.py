@@ -58,7 +58,7 @@ def test_scenario_families_coverage():
     gen._setup_base_policies(db)
     
     for scenario in ScenarioFamily:
-        example, attrs = gen.generate_single_example(db, scenario)
+        example, attrs = gen.generate_single_example(db, scenario, "10.4")
         
         # Verify it successfully passed through F1, F2, F3
         assert example.label in [0, 1]

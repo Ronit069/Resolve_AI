@@ -13,16 +13,17 @@ from app.models.shared import Case, Merchant, ProcessingState, AppUser
 from app.models.module_a import Dispute
 from app.models.module_b import Payment, Order, Shipment, Refund
 from app.models.module_c import EvidenceDocument, EvidenceType, ScanStatus, EvidenceProcessingStatus, EvidenceRequirement
-from app.models.module_d import DocumentExtraction, DocumentProcessingJob
+from app.models.module_d import DocumentExtraction, DocumentProcessingJob, ExtractedField, DocumentQualityAssessment
 from app.models.module_e import (
     EvidencePolicyVersion, EvidenceValidationRun, ValidationRuleCatalog,
     ValidationRuleVersion, EvidencePolicyRuleVersion, EValidationRunStatus,
-    ERuleSeverity
+    ERuleSeverity, CrossSourceFieldLink
 )
 
 from app.services.validation import prepare_validation_run
 from app.services.validation_rules import evaluate_validation_run
 from app.services.feature_snapshot import generate_feature_snapshot
+from app.services.document_processing.quality import DeterministicQualityAssessor
 
 from app.services.ml.feature_builder import FeatureBuilderContext, build_ml_features
 from app.services.ml.label_policy import LabelContext, generate_contestability_label
@@ -41,11 +42,24 @@ class ScenarioFamily(str, Enum):
 
 
 class SyntheticBenchmarkGenerator:
+    # One policy per reason_code the RAG knowledge base actually tags
+    # (see scripts/ingest_razorpay_policies.py) -- each category's required
+    # evidence type matches what schema_registry.py already recognizes
+    # (INVOICE, PROOF_OF_DELIVERY) where it does, so training data exercises
+    # the same evidence-category shapes live traffic will send once disputes
+    # outside reason_code=10.4 start arriving (issue #10).
+    REASON_CODE_EVIDENCE_TYPE = {
+        "10.4": "INVOICE",              # fraud / unauthorized transaction
+        "13.1": "PROOF_OF_DELIVERY",    # non-receipt of goods or services
+        "13.3": "SERVICE_CONFIRMATION", # not as described
+        "13.6": "REFUND_RECEIPT",       # credit not processed
+    }
+
     def __init__(self, seed: int = 42):
         self.rng = random.Random(seed)
         self.seed = seed
         self.generation_timestamp = datetime.now(timezone.utc)
-        
+
         # Initial scenario weights
         self.scenario_weights = {
             ScenarioFamily.STRONG_CONTESTABLE: 0.30,
@@ -57,43 +71,35 @@ class SyntheticBenchmarkGenerator:
             ScenarioFamily.DEADLINE_STATUS_BLOCK: 0.05,
         }
 
+        # Uniform across reason codes: training data should cover each
+        # category the RAG knowledge base anticipates, not just fraud.
+        self.reason_code_weights = {code: 1.0 for code in self.REASON_CODE_EVIDENCE_TYPE}
+
     def _setup_base_policies(self, db: Session):
-        """Ensures that the required policies exist in the database."""
-        policy = db.query(EvidencePolicyVersion).filter_by(
-            payment_network="Visa", reason_code="10.4", phase="chargeback"
-        ).first()
-        
-        if not policy:
-            policy = EvidencePolicyVersion(
-                payment_network="Visa",
-                reason_code="10.4",
-                phase="chargeback",
-                version=1,
-                effective_from=datetime(2020, 1, 1, tzinfo=timezone.utc)
-            )
-            db.add(policy)
-            db.commit()
-            
-            # Setup rule catalogs
-            rules = [
-                ("REQUIRED_EVIDENCE_PRESENT", ERuleSeverity.ERROR),
-                ("INVOICE_AMOUNT_MATCH", ERuleSeverity.ERROR),
-                ("DELIVERY_BEFORE_DISPUTE", ERuleSeverity.ERROR),
-                ("OCR_CONFIDENCE_ACCEPTABLE", ERuleSeverity.WARN),
-            ]
-            
-            for code, sev in rules:
-                cat = db.query(ValidationRuleCatalog).filter_by(rule_code=code).first()
-                if not cat:
-                    cat = ValidationRuleCatalog(
-                        rule_code=code,
-                        category="SYNTHETIC",
-                        description=f"Synthetic {code}",
-                        severity_default=sev
-                    )
-                    db.add(cat)
-                    db.commit()
-                    
+        """Ensures a policy (+ shared rule set + evidence requirement)
+        exists for every reason_code in REASON_CODE_EVIDENCE_TYPE."""
+        rules = [
+            ("REQUIRED_EVIDENCE_PRESENT", ERuleSeverity.ERROR),
+            ("INVOICE_AMOUNT_MATCH", ERuleSeverity.ERROR),
+            ("DELIVERY_BEFORE_DISPUTE", ERuleSeverity.ERROR),
+            ("OCR_CONFIDENCE_ACCEPTABLE", ERuleSeverity.WARN),
+        ]
+
+        rule_versions = []
+        for code, sev in rules:
+            cat = db.query(ValidationRuleCatalog).filter_by(rule_code=code).first()
+            if not cat:
+                cat = ValidationRuleCatalog(
+                    rule_code=code,
+                    category="SYNTHETIC",
+                    description=f"Synthetic {code}",
+                    severity_default=sev
+                )
+                db.add(cat)
+                db.commit()
+
+            v = db.query(ValidationRuleVersion).filter_by(rule_id=cat.rule_id, version=1).first()
+            if not v:
                 v = ValidationRuleVersion(
                     rule_id=cat.rule_id,
                     version=1,
@@ -103,27 +109,47 @@ class SyntheticBenchmarkGenerator:
                 )
                 db.add(v)
                 db.commit()
-                
+
+            rule_versions.append((cat, v))
+
+        for reason_code, evidence_type in self.REASON_CODE_EVIDENCE_TYPE.items():
+            policy = db.query(EvidencePolicyVersion).filter_by(
+                payment_network="Visa", reason_code=reason_code, phase="chargeback"
+            ).first()
+            if policy:
+                continue
+
+            policy = EvidencePolicyVersion(
+                payment_network="Visa",
+                reason_code=reason_code,
+                phase="chargeback",
+                version=1,
+                effective_from=datetime(2020, 1, 1, tzinfo=timezone.utc)
+            )
+            db.add(policy)
+            db.commit()
+
+            for cat, v in rule_versions:
                 db.add(EvidencePolicyRuleVersion(
                     policy_version_id=policy.policy_version_id,
                     rule_id=cat.rule_id,
                     rule_version_id=v.id
                 ))
-            
+
             db.add(EvidenceRequirement(
-                reason_code="10.4",
-                evidence_type="INVOICE",
+                reason_code=reason_code,
+                evidence_type=evidence_type,
                 requirement_level="REQUIRED",
                 active=True
             ))
             db.commit()
 
-    def _generate_case_attributes(self, scenario: ScenarioFamily) -> Dict[str, Any]:
+    def _generate_case_attributes(self, scenario: ScenarioFamily, reason_code: str) -> Dict[str, Any]:
         """Generates deterministic A-E source data based on the scenario."""
         # Baseline deterministic values
         now = self.generation_timestamp
         dispute_time = now - timedelta(days=10)
-        
+
         attrs = {
             "merchant_id": f"merch_e2e_{self.rng.getrandbits(64)}",
             "group": f"group_{self.rng.randint(1, 100)}",
@@ -135,7 +161,9 @@ class SyntheticBenchmarkGenerator:
             "refund_amount": 0,
             "has_invoice": True,
             "dispute_status": "open",
-            "deadline": dispute_time + timedelta(days=20)
+            "deadline": dispute_time + timedelta(days=20),
+            "reason_code": reason_code,
+            "evidence_type": self.REASON_CODE_EVIDENCE_TYPE[reason_code],
         }
         
         if scenario == ScenarioFamily.STRONG_CONTESTABLE:
@@ -182,7 +210,7 @@ class SyntheticBenchmarkGenerator:
             payment_id="pay_synth_1",
             amount_minor=attrs["amount"],
             currency="USD",
-            reason_code="10.4",
+            reason_code=attrs["reason_code"],
             phase="chargeback",
             status=attrs["dispute_status"],
             dispute_created_at=attrs["dispute_time"],
@@ -225,10 +253,11 @@ class SyntheticBenchmarkGenerator:
             ))
             
         if attrs["has_invoice"]:
+            evidence_type = attrs["evidence_type"]
             doc = EvidenceDocument(
                 case_id=case.case_id,
                 merchant_id=case.merchant_id,
-                evidence_type="INVOICE",
+                evidence_type=evidence_type,
                 original_filename="inv.pdf",
                 mime_type="application/pdf",
                 file_size_bytes=1024,
@@ -239,7 +268,7 @@ class SyntheticBenchmarkGenerator:
             )
             db.add(doc)
             db.flush()
-            
+
             doc_job = DocumentProcessingJob(
                 document_id=doc.document_id,
                 case_id=case.case_id,
@@ -251,13 +280,13 @@ class SyntheticBenchmarkGenerator:
             )
             db.add(doc_job)
             db.flush()
-            
+
             # Deterministic adapter for Module D
             ext = DocumentExtraction(
                 job_id=doc_job.job_id,
                 document_id=doc.document_id,
                 case_id=case.case_id,
-                expected_evidence_type="INVOICE",
+                expected_evidence_type=evidence_type,
                 type_match_status="MATCH",
                 extraction_status="COMPLETED",
                 schema_version="v1",
@@ -265,7 +294,39 @@ class SyntheticBenchmarkGenerator:
                 overall_confidence=attrs["ocr_confidence"]
             )
             db.add(ext)
-            
+            db.flush()
+
+            # Real ExtractedField + DocumentQualityAssessment rows, closing
+            # the training/serving gap (issue #9): previously these were
+            # never created here, so avg_ocr_confidence/min_ocr_confidence/
+            # document_quality_score were always null in training despite
+            # live scoring producing real values for them.
+            field = ExtractedField(
+                extraction_id=ext.extraction_id,
+                document_id=doc.document_id,
+                field_name="total_amount",
+                value_type="string",
+                raw_value_masked=str(attrs["invoice_amount"]),
+                numeric_value=attrs["invoice_amount"],
+                field_confidence=attrs["ocr_confidence"],
+                review_status="NOT_REQUIRED",
+            )
+            db.add(field)
+            db.flush()
+
+            # Reuse the real quality assessor (same logic the live pipeline
+            # runs in app/worker/tasks.py) rather than hand-rolling a
+            # parallel quality-score formula that could drift from it.
+            quality = DeterministicQualityAssessor().assess_document(
+                job_id=doc_job.job_id,
+                document_id=doc.document_id,
+                pages=[],
+                extraction=ext,
+                extracted_fields=[field],
+                text_chunks=[f"Total: {attrs['invoice_amount']}"],
+            )
+            db.add(quality)
+
         case.processing_state = ProcessingState.D_INTELLIGENCE_READY
         db.commit()
         return case.case_id
@@ -303,7 +364,24 @@ class SyntheticBenchmarkGenerator:
         from app.models.module_e import EvidenceValidationResult, EvidenceRequirementAssessment
         results = db.query(EvidenceValidationResult).filter_by(validation_run_id=run.id).all()
         assessments = db.query(EvidenceRequirementAssessment).filter_by(validation_run_id=run.id).all()
-        
+
+        documents = db.query(EvidenceDocument).filter_by(case_id=case_id).all()
+        document_ids = [d.document_id for d in documents]
+
+        # Real extracted_fields/quality_assessments/links the case actually
+        # produced, instead of the hardcoded [] that previously meant these
+        # features (avg_ocr_confidence, document_quality_score, amount_match,
+        # ...) were always null in training (issue #9).
+        extracted_fields = (
+            db.query(ExtractedField).filter(ExtractedField.document_id.in_(document_ids)).all()
+            if document_ids else []
+        )
+        quality_assessments = (
+            db.query(DocumentQualityAssessment).filter(DocumentQualityAssessment.document_id.in_(document_ids)).all()
+            if document_ids else []
+        )
+        links = db.query(CrossSourceFieldLink).filter_by(validation_run_id=run.id).all()
+
         context = FeatureBuilderContext(
             case=case,
             dispute=dispute,
@@ -311,20 +389,20 @@ class SyntheticBenchmarkGenerator:
             orders=db.query(Order).filter_by(case_id=case_id).all(),
             shipments=db.query(Shipment).filter_by(case_id=case_id).all(),
             refunds=db.query(Refund).filter_by(case_id=case_id).all(),
-            documents=db.query(EvidenceDocument).filter_by(case_id=case_id).all(),
+            documents=documents,
             extractions=db.query(DocumentExtraction).filter_by(case_id=case_id).all(),
-            extracted_fields=[],
-            quality_assessments=[],
+            extracted_fields=extracted_fields,
+            quality_assessments=quality_assessments,
             run=run,
             assessments=assessments,
             results=results,
-            links=[]
+            links=links
         )
         
         return materialize_example_from_context(context, self.generation_timestamp)
 
-    def generate_single_example(self, db: Session, scenario: ScenarioFamily) -> tuple[MLExample, Dict[str, Any]]:
-        attrs = self._generate_case_attributes(scenario)
+    def generate_single_example(self, db: Session, scenario: ScenarioFamily, reason_code: str) -> tuple[MLExample, Dict[str, Any]]:
+        attrs = self._generate_case_attributes(scenario, reason_code)
         case_id = self._build_database_records(db, attrs)
         run = self._execute_module_e_pipeline(db, case_id)
         example = self._generate_ml_example(db, case_id, run)
@@ -339,18 +417,21 @@ class SyntheticBenchmarkGenerator:
         
         scenarios = list(self.scenario_weights.keys())
         weights = list(self.scenario_weights.values())
-        
+        reason_codes = list(self.reason_code_weights.keys())
+        reason_code_weights = list(self.reason_code_weights.values())
+
         examples = []
         while len(examples) < size:
             chosen_scenario = self.rng.choices(scenarios, weights=weights, k=1)[0]
+            chosen_reason_code = self.rng.choices(reason_codes, weights=reason_code_weights, k=1)[0]
             try:
-                example, attrs = self.generate_single_example(db, chosen_scenario)
+                example, attrs = self.generate_single_example(db, chosen_scenario, chosen_reason_code)
                 ex_dict = {
                     "example_id": str(uuid.UUID(int=self.rng.getrandbits(128))),
                     "case_id": example.case_id,
                     "prediction_timestamp": example.prediction_timestamp.isoformat(),
                     "synthetic_customer_group": attrs["group"],
-                    "reason_code": "10.4",
+                    "reason_code": attrs["reason_code"],
                     "feature_schema_version": example.feature_schema_version,
                     "features": example.features,
                     "label_schema_version": example.label_schema_version,
