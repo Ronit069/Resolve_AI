@@ -2,7 +2,8 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Boolean, BigInteger, Integer, DateTime, ForeignKey, Enum, Numeric, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import JSONB
+from app.core.types import UUID
 from app.core.database import Base
 from sqlalchemy.types import TypeDecorator, JSON
 

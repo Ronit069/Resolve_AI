@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, String, Boolean, BigInteger, Integer, DateTime, ForeignKey, Enum, JSON
 from sqlalchemy.orm import relationship
 from app.core.database import Base
-from sqlalchemy.dialects.postgresql import UUID
+from app.core.types import UUID
 
 class ProcessingState(str, enum.Enum):
     RECEIVED = "RECEIVED"

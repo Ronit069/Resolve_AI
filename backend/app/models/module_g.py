@@ -3,7 +3,7 @@ import enum
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Enum, UniqueConstraint, Index, Text, Boolean, Numeric
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import UUID
+from app.core.types import UUID
 from pgvector.sqlalchemy import Vector
 from app.core.database import Base
 from app.models.module_d import JSONVariant
