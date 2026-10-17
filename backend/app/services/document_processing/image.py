@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.services.intelligence import IntelligenceError
 from app.models.module_d import DocumentPage
 from app.core.storage import storage_client
+from app.services.document_processing.preprocessor import StandardPreprocessor
 
 class ImageProcessor:
     @staticmethod
@@ -42,13 +43,9 @@ class ImageProcessor:
                         f"Image dimensions ({width}x{height}) exceed limits ({settings.MAX_IMAGE_WIDTH}x{settings.MAX_IMAGE_HEIGHT})"
                     )
 
-                # Convert to standard RGB format if needed to ensure consistency
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
-                
-                img_byte_arr = io.BytesIO()
-                img.save(img_byte_arr, format='PNG')
-                img_data = img_byte_arr.getvalue()
+                with open(file_path, "rb") as f:
+                    raw_bytes = f.read()
+                img_data, preprocessing_metadata = StandardPreprocessor().preprocess_image(raw_bytes)
 
                 # Save to private storage as a derived artifact
                 artifact_key = f"derived/{case_id}/{document_id}/{job_id}/page_1.png"
@@ -59,12 +56,12 @@ class ImageProcessor:
                     job_id=job_id,
                     document_id=document_id,
                     page_number=1,
-                    width_px=width,
-                    height_px=height,
+                    width_px=preprocessing_metadata["output_width_px"],
+                    height_px=preprocessing_metadata["output_height_px"],
                     rotation_degrees=0,
                     native_text_used=False,
                     page_artifact_key=artifact_key,
-                    preprocessing_json=None
+                    preprocessing_json=preprocessing_metadata
                 )
                 
                 return [doc_page]

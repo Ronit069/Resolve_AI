@@ -434,6 +434,43 @@ def test_pdf_processing(mock_context):
         except Exception:
             pass
 
+def test_pdf_processing_scanned_page_runs_preprocessing(mock_context):
+    from app.services.document_processing.pdf import PDFProcessor
+    db = mock_context["db"]
+    job_id = uuid.uuid4()
+    doc_id = mock_context["document"].document_id
+    case_id = mock_context["case"].case_id
+
+    # A page with no extractable text (a scanned page) must go through
+    # rendering -> StandardPreprocessor, unlike the native-text path above.
+    pdf = fitz.open()
+    pdf.new_page(width=595, height=842)
+
+    tmp_pdf = "test_temp_scanned.pdf"
+    pdf.save(tmp_pdf)
+    pdf.close()
+
+    with patch("app.core.storage.storage_client.upload_file") as mock_upload:
+        try:
+            pages = PDFProcessor.process_pdf(db, tmp_pdf, job_id, doc_id, case_id)
+            assert len(pages) == 1
+            assert pages[0].native_text_used is False
+            assert pages[0].page_artifact_key is not None
+            assert pages[0].preprocessing_json is not None
+            assert pages[0].preprocessing_json["denoised"] is True
+            assert pages[0].preprocessing_json["contrast_normalized"] is True
+            # width_px/height_px describe the artifact actually uploaded
+            # (OCR bbox validation bounds against these), not the PDF's
+            # native point-space page rect.
+            assert pages[0].width_px == pages[0].preprocessing_json["output_width_px"]
+            assert pages[0].height_px == pages[0].preprocessing_json["output_height_px"]
+            mock_upload.assert_called_once()
+        finally:
+            try:
+                os.remove(tmp_pdf)
+            except Exception:
+                pass
+
 def test_image_processing(mock_context):
     from app.services.document_processing.image import ImageProcessor
     db = mock_context["db"]
@@ -450,9 +487,16 @@ def test_image_processing(mock_context):
         try:
             pages = ImageProcessor.process_image(db, tmp_img, job_id, doc_id, case_id, "image/png")
             assert len(pages) == 1
-            assert pages[0].width_px == 100
-            assert pages[0].height_px == 100
+            # StandardPreprocessor upscales small images (long edge < 900px)
+            # to a 1200px long edge for OCR-readiness, so width_px/height_px
+            # reflect the processed artifact actually stored, not the
+            # original 100x100 input.
+            assert pages[0].width_px == 1200
+            assert pages[0].height_px == 1200
             assert pages[0].page_artifact_key is not None
+            assert pages[0].preprocessing_json["resized"] is True
+            assert pages[0].preprocessing_json["denoised"] is True
+            assert pages[0].preprocessing_json["contrast_normalized"] is True
             mock_upload.assert_called_once()
         finally:
             try:
