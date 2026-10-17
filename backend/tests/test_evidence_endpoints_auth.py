@@ -142,8 +142,8 @@ def test_upload_no_identity_rejected(mocker):
     finally:
         db.close()
 
-    response = do_upload(case_id)  # no X-User-Id at all
-    assert response.status_code == 422
+    response = do_upload(case_id)  # no credentials at all
+    assert response.status_code == 401
 
 
 def test_list_no_identity_rejected():
@@ -155,7 +155,7 @@ def test_list_no_identity_rejected():
         db.close()
 
     response = do_list(case_id)
-    assert response.status_code == 422
+    assert response.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +311,7 @@ def test_unauthorized_uploads_create_no_evidence_rows(mocker):
     r_inactive = do_upload(case_id, headers={"X-User-Id": str(inactive_user_id)})
     r_cross_tenant = do_upload(case_id, headers={"X-User-Id": str(cross_tenant_user_id)})
 
-    assert r_no_identity.status_code == 422
+    assert r_no_identity.status_code == 401
     assert r_unknown.status_code == 401
     assert r_inactive.status_code == 401
     assert r_cross_tenant.status_code == 404

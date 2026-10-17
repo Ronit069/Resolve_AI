@@ -9,6 +9,13 @@ export type AppUserRole =
   | "SYSTEM_WORKER"
   | "MODEL_MAINTAINER";
 
+export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  user_id: string;
+  role: AppUserRole;
+}
+
 export type ReviewActionEnum =
   | "APPROVE_CONTEST"
   | "APPROVE_ACCEPT"

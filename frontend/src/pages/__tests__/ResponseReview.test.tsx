@@ -10,6 +10,7 @@ vi.mock("../../api/client", () => ({
   submitReviewAction: vi.fn(),
   generateDraft: vi.fn(),
   setApiIdentity: vi.fn(),
+  setApiAccessToken: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     detail: string;

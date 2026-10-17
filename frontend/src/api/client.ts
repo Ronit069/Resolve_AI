@@ -8,12 +8,23 @@ import type {
   ReviewActionResponse,
   ApiErrorBody,
   ModelEvaluationResponse,
+  LoginResponse,
 } from "./types";
 
+// Real auth: a JWT access token from POST /api/v1/auth/login, sent as
+// Authorization: Bearer <token>. Takes priority over X-User-Id below.
+let currentAccessToken: string | null = null;
+
+export function setApiAccessToken(token: string | null) {
+  currentAccessToken = token;
+}
+
 // Development-mode identity is attached as a plain X-User-Id header on
-// every request. This is NOT a credential and is never sent as a cookie —
-// see docs/... Module I blueprint §7 and the frozen PO decision: X-User-Id
-// is a development-only identity mechanism, not production authentication.
+// every request, only when no access token is set. This is NOT a
+// credential and is never sent as a cookie — the backend itself hard-
+// disables this header whenever ENVIRONMENT is production-like (see
+// app/api/deps.py::get_current_user); it exists purely so this frontend
+// still works against demo-seeded accounts that have no password set.
 let currentUserId: string | null = null;
 
 export function setApiIdentity(userId: string | null) {
@@ -40,7 +51,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     "Content-Type": "application/json",
     ...(init.headers as Record<string, string> | undefined),
   };
-  if (currentUserId) {
+  if (currentAccessToken) {
+    headers["Authorization"] = `Bearer ${currentAccessToken}`;
+  } else if (currentUserId) {
     headers["X-User-Id"] = currentUserId;
   }
 
@@ -62,6 +75,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+export function login(email: string, password: string): Promise<LoginResponse> {
+  return request("/api/v1/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
 }
 
 // ---- Existing H/G/H-22 contracts (consumed as-is, never modified) ----
