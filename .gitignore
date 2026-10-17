@@ -18,6 +18,7 @@ __pycache__/
 *.db-shm
 *.sqlite
 *.sqlite3
+dump.rdb
 
 # Test/cache
 .pytest_cache/
