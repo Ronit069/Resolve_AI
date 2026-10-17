@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -62,3 +62,22 @@ class ModelEvaluationResponse(BaseModel):
     brier_calibrated: float
     model: ModelEvaluationModelProvenance
     evaluation: ModelEvaluationProvenance
+
+
+# ---- Training/live feature-distribution drift (issue #11) ----
+
+class FeatureDriftDetail(BaseModel):
+    psi: Optional[float] = None
+    severity: str
+    reference_count: int
+    reference_mean: Optional[float] = None
+    current_count: int
+    current_mean: Optional[float] = None
+
+
+class DriftReportResponse(BaseModel):
+    live_sample_count: int
+    max_psi: Optional[float] = None
+    overall_severity: str
+    drifted_features: List[str]
+    features: Dict[str, FeatureDriftDetail]

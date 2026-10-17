@@ -7,7 +7,7 @@ import uuid
 from app.core.config import settings
 from app.core.database import engine, Base, get_db
 from app.models.shared import Merchant, AppUser
-from app.api.endpoints import auth, webhooks, dev, enrichment, evidence, intelligence, validation, generation, review, observability, queue, audit, outcome_webhooks, runtime_observability, model_evaluation
+from app.api.endpoints import auth, webhooks, dev, enrichment, evidence, intelligence, validation, generation, review, observability, queue, audit, outcome_webhooks, runtime_observability, model_evaluation, drift_monitoring
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Backend Foundation for Modules A, B, and C",
@@ -46,3 +46,4 @@ app.include_router(audit.router, prefix="/api/v1/cases", tags=["audit"])
 app.include_router(outcome_webhooks.router, prefix="/api/v1", tags=["outcome_feedback"])
 app.include_router(runtime_observability.router, prefix="/api/v1/observability", tags=["observability"])
 app.include_router(model_evaluation.router, prefix="/api/v1/observability", tags=["observability"])
+app.include_router(drift_monitoring.router, prefix="/api/v1/observability", tags=["observability"])
