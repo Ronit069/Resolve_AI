@@ -1,0 +1,78 @@
+# Same deployment target as the worker Deployments (issue #17: "a
+# deployment target consistent with whatever's chosen for the API").
+# Stateless, no probes beyond the existing /health endpoint.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resolveai-api
+  labels:
+    app: resolveai-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: resolveai-api
+  template:
+    metadata:
+      labels:
+        app: resolveai-api
+    spec:
+      containers:
+        - name: api
+          image: resolveai-api:latest # built from backend/Dockerfile.api
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: resolveai-secrets
+            - configMapRef:
+                name: resolveai-config
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: resolveai-api
+spec:
+  selector:
+    app: resolveai-api
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: resolveai-api-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: resolveai-api
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

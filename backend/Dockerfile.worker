@@ -14,4 +14,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info"]
+# Issue #17: a Celery worker with no -Q flag only consumes the default
+# "celery" queue -- since process_evidence_document_task now routes to
+# its own "documents" queue (app/worker/celery_app.py's task_routes),
+# consuming both here keeps this single-process image correct for a
+# one-worker deployment (docker-compose.yaml's own worker service).
+# k8s/worker-documents-deployment.yaml overrides this command to -Q
+# documents only, scaled independently from the default-queue worker.
+CMD ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "-Q", "celery,documents"]

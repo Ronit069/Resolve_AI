@@ -23,6 +23,17 @@ celery_app.conf.update(
     enable_utc=True,
     task_track_started=True,
     task_time_limit=3600,
+    # Issue #17: process_evidence_document_task (PDF/image preprocessing
+    # + real Tesseract OCR, issue #8) has a completely different resource
+    # and latency profile than every other task here -- routing it to its
+    # own queue lets k8s/worker-documents-deployment.yaml scale it
+    # independently of the lightweight default-queue worker, instead of
+    # one slow OCR job blocking risk-scoring/validation/enrichment behind
+    # it on a single worker process. Everything not listed stays on
+    # Celery's default "celery" queue.
+    task_routes={
+        "app.worker.tasks.process_evidence_document_task": {"queue": "documents"},
+    },
 )
 
 # Issue #16: every log line a task emits carries the same correlation_id

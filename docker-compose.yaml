@@ -5,6 +5,7 @@ services:
     # actually running against the same Postgres version the test suite
     # (and Alembic migrations) are validated against.
     image: pgvector/pgvector:pg16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: resolve_user
       POSTGRES_PASSWORD: resolve_password
@@ -21,11 +22,13 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
 
   minio:
     image: minio/minio:latest
+    restart: unless-stopped
     environment:
       MINIO_ROOT_USER: minio_admin
       MINIO_ROOT_PASSWORD: minio_password
@@ -46,6 +49,7 @@ services:
   # volume, not a managed/hosted service.
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
+    restart: unless-stopped
     # Issue #15: mlflow>=3.0 put the bare-filesystem backend store into
     # maintenance mode (it now raises instead of working) -- a sqlite:///
     # URI inside the same mounted volume is the same "local/self-hosted
@@ -67,6 +71,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.api
+    restart: unless-stopped
     env_file:
       - ./backend/.env
     environment:
@@ -86,11 +91,17 @@ services:
         condition: service_healthy
 
   # Module L: Celery worker (app/worker/tasks.py etc.), containerized —
-  # same code/deps as the existing (non-containerized) dev setup.
+  # same code/deps as the existing (non-containerized) dev setup. Issue
+  # #17: restart: unless-stopped is this single-host deployment's
+  # restart policy for a crashed worker. It consumes both the default
+  # and "documents" queues (Dockerfile.worker's CMD) since this is one
+  # process -- see k8s/ for the independently-scaled split used anywhere
+  # with more than one worker host.
   worker:
     build:
       context: ./backend
       dockerfile: Dockerfile.worker
+    restart: unless-stopped
     env_file:
       - ./backend/.env
     environment:
@@ -111,6 +122,7 @@ services:
   web:
     build:
       context: ./frontend
+    restart: unless-stopped
     ports:
       - "5173:80"
     depends_on:
