@@ -1,9 +1,25 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, model_validator
+
+# Values known to be placeholders: either hardcoded as a code-level default
+# (OPENAI_API_KEY/GROQ_API_KEY below) or the exact dev/test values this
+# project's own local setup and .env.example have used. See
+# backend/SECRETS.md for the full secret inventory.
+_PLACEHOLDER_SECRET_VALUES = {
+    "sk-dummy", "gsk_dummy", "testsecret", "dummysecret", "rzp_test_dummykeyid",
+}
+_PRODUCTION_LIKE_ENVIRONMENTS = {"production", "prod", "staging"}
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "ResolveAI Foundation"
-    
+
+    ENVIRONMENT: str = Field(
+        default="development",
+        description="Deployment environment name. Set to 'production' or 'staging' to enable "
+        "the startup check that refuses to boot with placeholder/dummy secret values "
+        "(see backend/SECRETS.md).",
+    )
+
     # Database
     POSTGRES_USER: str = Field(..., description="PostgreSQL User")
     POSTGRES_PASSWORD: str = Field(..., description="PostgreSQL Password")
@@ -81,5 +97,53 @@ class Settings(BaseSettings):
     MODEL_EVALUATION_ARTIFACT_DIR: str = Field(default="artifacts", description="Directory containing step15_final_holdout_eval_*/final_evaluation.json, written by the repo-root evaluate_holdout_step15.py script")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    def is_production_like(self) -> bool:
+        """True when ENVIRONMENT is production/prod/staging (case-insensitive).
+        Gates the X-User-Id dev-auth fallback in app/api/deps.py -- see
+        backend/SECRETS.md and app/core/security.py."""
+        return self.ENVIRONMENT.lower() in _PRODUCTION_LIKE_ENVIRONMENTS
+
+    @model_validator(mode="after")
+    def _reject_placeholder_secrets_outside_dev(self) -> "Settings":
+        """
+        A real deployment accidentally left on .env.example-style
+        placeholders, or on the OPENAI_API_KEY/GROQ_API_KEY code defaults,
+        fails loudly and immediately rather than starting up and only
+        failing later when a real API call hits a dummy key. Local/dev/test
+        runs (ENVIRONMENT left at its "development" default) are unaffected.
+        """
+        if self.ENVIRONMENT.lower() not in _PRODUCTION_LIKE_ENVIRONMENTS:
+            return self
+
+        secret_fields = {
+            "POSTGRES_PASSWORD": self.POSTGRES_PASSWORD,
+            "S3_ACCESS_KEY": self.S3_ACCESS_KEY,
+            "S3_SECRET_KEY": self.S3_SECRET_KEY,
+            "API_SECRET_KEY": self.API_SECRET_KEY,
+            "RAZORPAY_WEBHOOK_SECRET": self.RAZORPAY_WEBHOOK_SECRET,
+            "RAZORPAY_KEY_ID": self.RAZORPAY_KEY_ID,
+            "RAZORPAY_KEY_SECRET": self.RAZORPAY_KEY_SECRET,
+            "OPENAI_API_KEY": self.OPENAI_API_KEY,
+            "GROQ_API_KEY": self.GROQ_API_KEY,
+        }
+
+        offending = [
+            name
+            for name, value in secret_fields.items()
+            if value and (
+                value in _PLACEHOLDER_SECRET_VALUES
+                or value.lower().startswith("your_")
+                or value.lower().endswith("_here")
+            )
+        ]
+
+        if offending:
+            raise ValueError(
+                f"Refusing to start with ENVIRONMENT='{self.ENVIRONMENT}' while these settings "
+                f"still hold placeholder/dummy values: {', '.join(offending)}. Set real secrets "
+                "(see backend/SECRETS.md) before deploying outside local development."
+            )
+        return self
 
 settings = Settings()
