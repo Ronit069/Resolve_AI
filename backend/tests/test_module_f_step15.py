@@ -76,8 +76,12 @@ def test_train_and_validation_loading_unchanged():
     """
     train_data = train_load_jsonl("synthetic_benchmark_v1_train.jsonl")
     val_data = step13_load_jsonl("synthetic_benchmark_v1_validation.jsonl")
-    assert len(train_data) == 7108
-    assert len(val_data) == 1484
+    # Updated for the issue #9/#10 training-data change: adding one more
+    # deterministic rng draw per example (reason_code selection) shifts
+    # the customer_group assignments and therefore the exact grouped-split
+    # sizes, even though the split ratios themselves are unchanged.
+    assert len(train_data) == 7003
+    assert len(val_data) == 1506
 
 
 def test_artifact_contains_required_fields(evaluation):
