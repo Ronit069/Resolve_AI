@@ -44,7 +44,11 @@ def test_compose_file_is_valid_yaml_with_expected_services():
     # migrations and test suite are validated against.
     assert services["postgres"]["image"] == "pgvector/pgvector:pg16"
     assert services["redis"]["image"] == "redis:7-alpine"
-    assert services["minio"]["image"] == "minio/minio:latest"
+    # minio bumped minio/minio -> cgr.dev/chainguard/minio: MinIO Inc.
+    # discontinued free Docker Hub distribution of minio/minio (and the
+    # quay.io/minio/minio mirror) -- confirmed directly against Docker
+    # Hub's own API ("object not found"), not a transient registry issue.
+    assert services["minio"]["image"] == "cgr.dev/chainguard/minio:latest"
 
     assert services["api"]["build"]["dockerfile"] == "Dockerfile.api"
     assert services["worker"]["build"]["dockerfile"] == "Dockerfile.worker"
