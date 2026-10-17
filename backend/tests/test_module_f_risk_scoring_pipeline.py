@@ -31,7 +31,7 @@ import app.models.module_g
 import app.models.module_h
 from app.models.module_a import Dispute
 from app.models.module_e import CaseFeatureSnapshot, EValidationRunStatus, EvidencePolicyVersion, EvidenceValidationRun
-from app.models.module_f import ModelDecisionPolicy, ModelMetric, ModelVersion, RiskPrediction
+from app.models.module_f import ModelDecisionPolicy, ModelMetric, ModelVersion, PredictionExplanation, RiskPrediction
 from app.models.module_h import ReviewQueueItem
 
 from app.services.feature_snapshot import generate_feature_snapshot
@@ -55,6 +55,7 @@ def clean_db():
     db = TestingSessionLocal()
     try:
         db.query(ReviewQueueItem).delete()
+        db.query(PredictionExplanation).delete()
         db.query(RiskPrediction).delete()
         db.query(ModelMetric).delete()
         db.query(ModelDecisionPolicy).delete()
@@ -327,6 +328,54 @@ def test_score_case_persists_real_risk_prediction_and_is_idempotent(monkeypatch,
         prediction_again = score_case(db, case.case_id)
         assert prediction_again.id == prediction.id
         assert db.query(RiskPrediction).filter(RiskPrediction.case_id == case.case_id).count() == 1
+
+        explanations = (
+            db.query(PredictionExplanation)
+            .filter(PredictionExplanation.prediction_id == prediction.id)
+            .order_by(PredictionExplanation.rank)
+            .all()
+        )
+        assert 1 <= len(explanations) <= 5
+        assert [e.rank for e in explanations] == list(range(1, len(explanations) + 1))
+        for explanation in explanations:
+            assert explanation.feature_name
+            assert explanation.contribution is not None
+            assert explanation.direction in ("INCREASES_RISK", "DECREASES_RISK", "NEUTRAL")
+            assert explanation.display_text
+
+        # Ranked by |contribution| descending.
+        magnitudes = [abs(float(e.contribution)) for e in explanations]
+        assert magnitudes == sorted(magnitudes, reverse=True)
+
+        # Did not get duplicated by the idempotent second score_case() call.
+        assert (
+            db.query(PredictionExplanation).filter(PredictionExplanation.prediction_id == prediction.id).count()
+            == len(explanations)
+        )
+    finally:
+        db.close()
+
+
+def test_score_case_persists_prediction_even_if_shap_explanation_fails(monkeypatch, fake_champion_artifacts_dir):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "MODEL_EVALUATION_ARTIFACT_DIR", fake_champion_artifacts_dir)
+    monkeypatch.setattr(
+        "app.services.ml.inference.compute_shap_explanations",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    db = TestingSessionLocal()
+    try:
+        case, dispute, run, snapshot = _make_case_with_snapshot(db)
+        promote_candidate_from_disk(db)
+
+        prediction = score_case(db, case.case_id)
+        db.commit()
+
+        assert prediction is not None
+        assert db.query(PredictionExplanation).filter(
+            PredictionExplanation.prediction_id == prediction.id
+        ).count() == 0
     finally:
         db.close()
 

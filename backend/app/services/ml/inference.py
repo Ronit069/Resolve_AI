@@ -4,9 +4,11 @@ Module F — live risk scoring.
 Scores a case's current CaseFeatureSnapshot with the frozen champion
 model + calibrator + locked 3-way decision policy already produced by
 the offline pipeline (see mlops/champion_loader.py), and persists the
-result as a RiskPrediction. This is the only place in the application
-that calls model.predict_proba on live traffic -- everything upstream
-(feature_snapshot.py) and downstream (review/queue.py) is unchanged.
+result as a RiskPrediction, plus its top-contributing-feature SHAP
+explanations (see ml/explanations.py) as PredictionExplanation rows.
+This is the only place in the application that calls model.predict_proba
+on live traffic -- everything upstream (feature_snapshot.py) and
+downstream (review/queue.py) is unchanged.
 
 Never fabricates a prediction: if there is no current feature snapshot,
 or no champion has been promoted on this machine (see
@@ -23,8 +25,9 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from app.models.module_e import CaseFeatureSnapshot
-from app.models.module_f import RiskPrediction
+from app.models.module_f import PredictionExplanation, RiskPrediction
 from app.models.shared import Case
+from app.services.ml.explanations import compute_shap_explanations
 from app.services.ml.training.preprocessor import Preprocessor
 from app.services.mlops.champion_loader import ChampionArtifactsUnavailable, load_champion_artifacts
 
@@ -111,4 +114,29 @@ def score_case(db: Session, case_id: uuid.UUID) -> Optional[RiskPrediction]:
     )
     db.add(prediction)
     db.flush()
+
+    # Explanations are a display aid, not part of the decision itself --
+    # a failure here (e.g. an unexpected SHAP/library error) is logged
+    # and swallowed so it never costs the case its prediction.
+    try:
+        explanations = compute_shap_explanations(
+            artifacts.model, X, preprocessor.categorical_features, snapshot.features_json
+        )
+    except Exception:
+        logger.exception(f"SHAP explanation generation failed for case {case_id}; prediction persisted without it.")
+        explanations = []
+
+    for explanation in explanations:
+        db.add(PredictionExplanation(
+            prediction_id=prediction.id,
+            rank=explanation["rank"],
+            feature_name=explanation["feature_name"],
+            feature_value=explanation["feature_value"],
+            contribution=explanation["contribution"],
+            direction=explanation["direction"],
+            display_text=explanation["display_text"],
+        ))
+    if explanations:
+        db.flush()
+
     return prediction
