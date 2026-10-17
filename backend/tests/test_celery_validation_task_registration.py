@@ -23,11 +23,16 @@ app.worker.celery_app and asks Celery's own loader to import its
 with no other module pulling validation_tasks.py in via a side door.
 """
 import json
+import os
 import subprocess
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
+
+# The repo's backend/ directory, wherever this checkout lives -- never a
+# hardcoded absolute path, which would only ever work on one machine.
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 import pytest
 from sqlalchemy import create_engine
@@ -111,7 +116,7 @@ def test_task_registered_in_fresh_worker_equivalent_process():
     )
     result = subprocess.run(
         [sys.executable, "-c", script],
-        cwd="/home/user/Resolve_AI/backend",
+        cwd=BACKEND_DIR,
         capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, f"subprocess failed: {result.stderr}"
@@ -269,7 +274,7 @@ def test_no_duplicate_registration_in_fresh_worker_equivalent_process():
     )
     result = subprocess.run(
         [sys.executable, "-c", script],
-        cwd="/home/user/Resolve_AI/backend",
+        cwd=BACKEND_DIR,
         capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, f"subprocess failed: {result.stderr}"

@@ -18,7 +18,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U resolve_user"
+          --health-cmd "pg_isready -U resolve_user -d resolve_db"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -78,6 +78,24 @@ jobs:
             curl -sf http://localhost:9000 > /dev/null && break
             sleep 1
           done
+
+      - name: Generate offline ML pipeline artifacts
+        working-directory: backend
+        # Several tests (test_module_f_step14.py, test_module_f_step15.py)
+        # and the GET /api/v1/observability/model-evaluation endpoint
+        # (test_module_l_model_evaluation.py) read artifacts/ written by
+        # this offline pipeline -- it was always run by hand locally
+        # before pytest, never by CI, since CI didn't exist until now.
+        # Self-contained: each script uses its own local SQLite file, not
+        # the service Postgres above, and writes only to ./artifacts and
+        # ./*.jsonl in this working directory.
+        run: |
+          python run_benchmark.py
+          python split_benchmark.py
+          python train_benchmark.py
+          python calibrate_winner_step13.py
+          python optimize_thresholds_step14.py
+          python evaluate_holdout_step15.py
 
       - name: Run backend test suite
         working-directory: backend

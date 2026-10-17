@@ -199,7 +199,7 @@ def test_track_latency_decorated_celery_tasks_register_under_their_own_module():
     )
     result = subprocess.run(
         [sys.executable, "-c", script],
-        cwd="/home/user/Resolve_AI/backend",
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, f"subprocess failed: {result.stderr}"
