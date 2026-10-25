@@ -27,7 +27,15 @@
 
   --text: #f8f8ff;
   --text-muted: #94a3b8;
-  --text-faint: #5b6577;
+  /* Issue #20: the previous #5b6577 only hit ~3.3:1 against this theme's
+     dark backgrounds (nav-link-muted's "Switch identity" link, kpi-sub's
+     KPI card subtext) -- both real, normal-size (12-13.5px) text, so
+     WCAG AA's 4.5:1 floor applies, not the 3:1 large-text one. This
+     value clears 5:1 against the page background and the navbar's
+     composited (gradient + 72%-opacity) background alike -- axe-core
+     can't verify contrast through either, so checked by hand; see
+     docs/ResolveAI_Accessibility_Audit.md. */
+  --text-faint: #79818f;
 
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
@@ -741,6 +749,22 @@ textarea {
 /* ============================================================
    Misc utilities
    ============================================================ */
+/* Issue #20: standard screen-reader-only pattern -- visible to assistive
+   tech, removed from layout/visual flow. Used for a table header's
+   accessible name when the column (e.g. a row of action links) has no
+   visible heading text of its own. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;

@@ -107,12 +107,14 @@ export function DisputeQueue() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Reason</th>
-                    <th>Amount</th>
-                    <th>Status</th>
-                    <th>Deadline</th>
-                    <th>Recommendation</th>
-                    <th />
+                    <th scope="col">Reason</th>
+                    <th scope="col">Amount</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Deadline</th>
+                    <th scope="col">Recommendation</th>
+                    <th scope="col">
+                      <span className="visually-hidden">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
