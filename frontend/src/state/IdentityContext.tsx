@@ -118,7 +118,16 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
     setRoleLabelState(nextRole);
     setAccessTokenState(nextToken);
     try {
-      window.localStorage.removeItem(USER_ID_KEY);
+      // USER_ID_KEY still gets written here (not removed) -- RequireIdentity
+      // (App.tsx) gates every protected route on `userId` alone, so without
+      // this a real sign-in's session doesn't survive a page reload: the
+      // access token is still valid in storage, but the lazy useState
+      // initializer below finds no userId and bounces straight to /login.
+      // Safe to reuse the same key the dev selector also writes: the two
+      // credential sources are still mutually exclusive, since accessToken
+      // being set means userId's value here is never read as an X-User-Id
+      // header (see the `if (!accessToken)` guard below and api/client.ts).
+      window.localStorage.setItem(USER_ID_KEY, nextUserId);
       window.localStorage.setItem(ACCESS_TOKEN_KEY, nextToken);
       window.localStorage.setItem(ROLE_KEY, nextRole);
     } catch {

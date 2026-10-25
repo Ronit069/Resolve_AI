@@ -102,7 +102,7 @@ npx playwright install chromium   # one-time browser download
 npm run test:e2e
 ```
 
-The suite signs in via the development identity selector, not the real sign-in form, for the seeded demo accounts specifically — their `@resolveai.local` addresses are rejected outright by the login endpoint's email validation (`.local` is a reserved TLD), a separate pre-existing bug tracked on its own. It looks up the seeded demo approver's user id directly from Postgres (`psql`, via `E2E_POSTGRES_HOST`/`PORT`/`USER`/`PASSWORD`/`DB` env vars — defaults match `docker compose`'s exposed port 5433), since `scripts/seed_demo.py` assigns that id randomly on every fresh seed. Point it at a non-default frontend URL with `PLAYWRIGHT_BASE_URL`. Runs in CI against the full `docker compose` stack — see `.github/workflows/docker-build.yml`.
+The suite signs in through the real sign-in form as the seeded `demo.approver@resolveai-demo.com` account, the same path a real user hits — not the development identity selector. Point it at a non-default frontend URL with `PLAYWRIGHT_BASE_URL`, or a non-default demo password with `DEMO_USER_PASSWORD` (same env var `scripts/seed_demo.py` reads). Runs in CI against the full `docker compose` stack — see `.github/workflows/docker-build.yml`.
 
 ## MLflow (experiment tracking)
 

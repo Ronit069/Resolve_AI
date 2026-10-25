@@ -10,4 +10,3 @@ tsconfig.tsbuildinfo
 /playwright-report/
 /blob-report/
 /playwright/.cache/
-e2e/.demo-approver-user-id.json

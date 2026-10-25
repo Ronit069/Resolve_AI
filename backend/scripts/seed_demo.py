@@ -40,11 +40,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 DEMO_MERCHANT_EXTERNAL_ID = "demo_merchant_resolveai"
+# Issue #22: these previously used @resolveai.local. ".local" is a
+# special-use/reserved TLD (RFC 6761) that email-validator (the library
+# behind LoginRequest's EmailStr) rejects outright and unconditionally --
+# confirmed the installed version (2.3.0) exposes no flag to allow it --
+# so these accounts could never actually sign in through the real
+# POST /api/v1/auth/login this script's own printed output implies they
+# can. A plain, non-reserved domain sidesteps that without touching
+# login's validation at all.
 DEMO_USERS = [
-    ("demo.admin@resolveai.local", "MERCHANT_ADMIN"),
-    ("demo.analyst@resolveai.local", "RISK_ANALYST"),
-    ("demo.approver@resolveai.local", "APPROVER"),
-    ("demo.model_maintainer@resolveai.local", "MODEL_MAINTAINER"),
+    ("demo.admin@resolveai-demo.com", "MERCHANT_ADMIN"),
+    ("demo.analyst@resolveai-demo.com", "RISK_ANALYST"),
+    ("demo.approver@resolveai-demo.com", "APPROVER"),
+    ("demo.model_maintainer@resolveai-demo.com", "MODEL_MAINTAINER"),
 ]
 DEMO_CASE_EXTERNAL_DISPUTE_ID = "demo_resolveai_seed_001"  # CONTEST path — preserved from the original seed
 # Overridable so a shared demo environment isn't stuck with this literal
@@ -308,7 +316,7 @@ def seed_demo_cases(db, evidence_policy, model_version, decision_policy):
     from app.models.shared import AppUser
     from app.models.module_h import ReviewActionEnum
 
-    reviewer = db.query(AppUser).filter(AppUser.email == "demo.approver@resolveai.local").first()
+    reviewer = db.query(AppUser).filter(AppUser.email == "demo.approver@resolveai-demo.com").first()
 
     # 1. CONTEST path: recommendation=CONTEST, finalized APPROVE_CONTEST —
     # H-10's own "submit eligible" definition. No ContestPackage/outbox

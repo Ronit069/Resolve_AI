@@ -17,10 +17,8 @@ test.describe("auth and routing", () => {
   });
 
   test("real sign-in with wrong credentials shows the server's error, not a silent failure", async ({ page }) => {
-    // A syntactically valid but non-existent address, deliberately not
-    // one of the @resolveai.local demo accounts: those addresses hit a
-    // separate, pre-existing EmailStr-validation bug (see global-setup.ts)
-    // that this assertion isn't meant to exercise.
+    // A syntactically valid but non-existent address -- this test only
+    // cares about the wrong-credentials path, not a specific account.
     await page.goto("/login");
     await page.getByLabel("Email").fill("nobody@example.com");
     await page.getByLabel("Password").fill("whatever-password");
