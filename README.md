@@ -89,6 +89,21 @@ npm run dev                            # Vite dev server, http://localhost:5173
 
 Run the backend test suite with `pytest` (from `backend/`) and the frontend suite with `npm test` (from `frontend/`).
 
+## End-to-end tests (Playwright)
+
+`frontend/e2e/` drives a real Chromium browser against a real running backend — the existing `frontend` vitest suite already covers component behavior against mocked API responses, so this is for the actual login → queue → case workspace → response review → audit activity flow, exercised through the UI exactly as a reviewer would use it.
+
+Requires the full stack up and seeded first (either `docker compose up` or the native flow above, then `python scripts/seed_demo.py` from `backend/` either way — see [Initialization / seed command](#initialization--seed-command)):
+
+```bash
+cd frontend
+npm install
+npx playwright install chromium   # one-time browser download
+npm run test:e2e
+```
+
+The suite signs in via the development identity selector, not the real sign-in form, for the seeded demo accounts specifically — their `@resolveai.local` addresses are rejected outright by the login endpoint's email validation (`.local` is a reserved TLD), a separate pre-existing bug tracked on its own. It looks up the seeded demo approver's user id directly from Postgres (`psql`, via `E2E_POSTGRES_HOST`/`PORT`/`USER`/`PASSWORD`/`DB` env vars — defaults match `docker compose`'s exposed port 5433), since `scripts/seed_demo.py` assigns that id randomly on every fresh seed. Point it at a non-default frontend URL with `PLAYWRIGHT_BASE_URL`. Runs in CI against the full `docker compose` stack — see `.github/workflows/docker-build.yml`.
+
 ## MLflow (experiment tracking)
 
 Both the real training pipeline (`backend/train_benchmark.py`, which produces what `promote_champion.py` actually promotes) and the LightGBM comparator (`backend/train_lightgbm_comparator.py`) log their existing params/metrics/dataset hashes to MLflow as a best-effort, additive step — a training run's actual computed result is identical whether or not MLflow is reachable (see `backend/app/services/mlops/mlflow_tracking.py`). Both tag `model_artifact_sha256` with the same hash their own `metadata.json` (and, once promoted, `ModelVersion.preprocessing_hash`) uses, so an MLflow run and a promoted model version are one lookup apart, not two disconnected records. By default `MLFLOW_TRACKING_URI` is a local SQLite file (`sqlite:///mlflow.db`); when running via `docker compose up`, the `api`/`worker` services point at the local `mlflow` compose service instead. There is no external/hosted MLflow and no production credential involved — this is a local/self-hosted deployment, per the project's own hackathon framing.
