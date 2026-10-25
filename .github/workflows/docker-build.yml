@@ -81,9 +81,6 @@ jobs:
       - name: Seed demo data for the E2E suite
         run: docker compose run --rm api python scripts/seed_demo.py
 
-      - name: Install postgresql-client (E2E suite looks up the seeded demo user's id)
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -100,11 +97,6 @@ jobs:
         working-directory: frontend
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:5173
-          E2E_POSTGRES_HOST: localhost
-          E2E_POSTGRES_PORT: "5433"
-          E2E_POSTGRES_USER: resolve_user
-          E2E_POSTGRES_PASSWORD: resolve_password
-          E2E_POSTGRES_DB: resolve_db
         run: npx playwright test
 
       - name: Upload Playwright report on failure

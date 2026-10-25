@@ -16,7 +16,10 @@ import { getQueueMetrics } from "../../api/client";
  */
 
 const USER_ID_KEY = "resolveai.dev.userId";
+const ACCESS_TOKEN_KEY = "resolveai.accessToken";
+const ROLE_KEY = "resolveai.dev.roleLabel";
 const KNOWN_USER_ID = "11111111-1111-1111-1111-111111111111";
+const KNOWN_TOKEN = "fake.jwt.token";
 
 function jsonResponse(body: unknown, status = 200) {
   return Promise.resolve(
@@ -172,5 +175,73 @@ describe("D-01: identity initialization vs. first authenticated request", () => 
       expect.stringContaining("/api/v1/observability/queue-metrics"),
       expect.objectContaining({ headers: expect.objectContaining({ "X-User-Id": KNOWN_USER_ID }) })
     );
+  });
+});
+
+/**
+ * Issue #22 follow-on regression test.
+ *
+ * Found while reworking frontend/e2e/ to sign in through the real login
+ * form (issue #22's fix made that possible for the demo accounts):
+ * setSession previously removed USER_ID_KEY instead of writing it, so
+ * RequireIdentity (App.tsx), which gates every protected route on
+ * `userId` alone, had nothing to find on the next mount -- a real sign-
+ * in's session didn't survive a page reload at all, even though its
+ * access token was still perfectly valid in storage. Caught directly by
+ * a real Playwright page.goto() after a real sign-in, not by this
+ * mocked unit test alone; this is the fast-running regression guard for
+ * the same defect.
+ */
+describe("issue #22 follow-on: a real sign-in session survives a page reload", () => {
+  it("setSession persists userId (not just the access token) to localStorage", async () => {
+    function Signer() {
+      const { setSession } = useIdentity();
+      return (
+        <button onClick={() => setSession(KNOWN_TOKEN, KNOWN_USER_ID, "APPROVER")}>sign in</button>
+      );
+    }
+
+    render(
+      <IdentityProvider>
+        <Signer />
+      </IdentityProvider>
+    );
+
+    await act(async () => {
+      screen.getByRole("button", { name: "sign in" }).click();
+    });
+
+    expect(window.localStorage.getItem(USER_ID_KEY)).toBe(KNOWN_USER_ID);
+    expect(window.localStorage.getItem(ACCESS_TOKEN_KEY)).toBe(KNOWN_TOKEN);
+    expect(window.localStorage.getItem(ROLE_KEY)).toBe("APPROVER");
+  });
+
+  it("reconstructs a non-null userId from a reload-simulated remount after a real sign-in, with no X-User-Id header sent", async () => {
+    // Simulates what a real page.goto()/F5 does: a fresh IdentityProvider
+    // mount reading only localStorage, exactly as it was left after a real
+    // setSession call (no in-memory React state carried over).
+    window.localStorage.setItem(USER_ID_KEY, KNOWN_USER_ID);
+    window.localStorage.setItem(ACCESS_TOKEN_KEY, KNOWN_TOKEN);
+    window.localStorage.setItem(ROLE_KEY, "APPROVER");
+
+    render(
+      <IdentityProvider>
+        <IdentityLabel />
+        <FetchOnMount />
+      </IdentityProvider>
+    );
+
+    await screen.findByText("consumer mounted");
+
+    // The route guard this is actually fixing (RequireIdentity) checks
+    // exactly this value.
+    expect(screen.getByTestId("identity-label")).toHaveTextContent(KNOWN_USER_ID);
+
+    // accessToken must still take priority: no X-User-Id header, an
+    // Authorization bearer header instead.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const headers = headersOf(fetchMock.mock.calls[0]);
+    expect(headers["X-User-Id"]).toBeUndefined();
+    expect(headers["Authorization"]).toBe(`Bearer ${KNOWN_TOKEN}`);
   });
 });
