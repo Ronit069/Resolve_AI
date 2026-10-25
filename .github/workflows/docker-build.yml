@@ -73,6 +73,48 @@ jobs:
       - name: Confirm the frontend is served
         run: curl -sf http://localhost:5173/ > /dev/null
 
+      # Issue #19: a real browser against this real running stack, not
+      # mocked API responses -- the frontend's existing vitest suite
+      # already covers that. Needs the three demo cases (CONTEST/REVIEW/
+      # ACCEPT) scripts/seed_demo.py seeds via the exact ingestion path
+      # live traffic uses.
+      - name: Seed demo data for the E2E suite
+        run: docker compose run --rm api python scripts/seed_demo.py
+
+      - name: Install postgresql-client (E2E suite looks up the seeded demo user's id)
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright's Chromium browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run frontend E2E tests
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:5173
+          E2E_POSTGRES_HOST: localhost
+          E2E_POSTGRES_PORT: "5433"
+          E2E_POSTGRES_USER: resolve_user
+          E2E_POSTGRES_PASSWORD: resolve_password
+          E2E_POSTGRES_DB: resolve_db
+        run: npx playwright test
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
       - name: Dump all logs on failure
         if: failure()
         run: docker compose logs
