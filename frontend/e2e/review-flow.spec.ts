@@ -15,7 +15,11 @@ test.describe("reviewer flow", () => {
   test("signs in and reaches the risk command center", async ({ page }) => {
     await signInAsApprover(page);
     await expect(page).toHaveURL("/");
-    await expect(page.getByRole("link", { name: "Dispute Queue" })).toBeVisible();
+    // Scoped to the navbar: the Risk Command Center itself also renders
+    // an "Open Dispute Queue →" CTA link once its metrics load, which a
+    // bare name match ambiguously also matches (a strict-mode violation
+    // that surfaced intermittently in CI depending on fetch timing).
+    await expect(page.locator("nav").getByRole("link", { name: "Dispute Queue" })).toBeVisible();
   });
 
   test("walks queue -> case workspace -> response review -> audit activity for the REVIEW-path demo case", async ({
@@ -23,7 +27,7 @@ test.describe("reviewer flow", () => {
   }) => {
     await signInAsApprover(page);
 
-    await page.getByRole("link", { name: "Dispute Queue" }).click();
+    await page.locator("nav").getByRole("link", { name: "Dispute Queue" }).click();
     await expect(page.getByRole("heading", { name: "Dispute Queue" })).toBeVisible();
 
     // The REVIEW-path demo case (seed_demo.py's case 2) is the only
